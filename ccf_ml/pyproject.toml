@@ -1,0 +1,33 @@
+[project]
+name = "ccf_ml"
+version = "0.1.0"
+description = "Machine Learning engine for Kaggle Playground Series S6E11 (Predicting Credit Card Fraud)"
+requires-python = ">=3.12"
+dependencies = [
+    "kagglehub",
+    "matplotlib>=3.11.2",
+    "pandas>=3.0.6",
+    "pyarrow>=17.0.0",
+    "pytest>=8.0.0",
+    "python-dotenv>=1.0.0",
+    "scikit-learn>=1.5.0",
+    "xgboost>=2.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+ccf_ml = ["package_artifacts/**/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]
+
+[tool.uv]
+# Install into the project-root venv: activate ../comp_venv, then `uv sync --active`.
+package = true
