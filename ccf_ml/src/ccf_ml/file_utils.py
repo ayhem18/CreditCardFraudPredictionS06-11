@@ -11,6 +11,13 @@ Layout::
                 /plots
                     /section_name
                 /tables
+            /training
+                /exp_name
+                    config.json
+                    oof.csv
+                    models/
+                    submission.csv
+                    eval_off/
       ccf_ml/src/ccf_ml/
         package_artifacts/         # collection and process configurations; git-tracked
           cv_splits/
@@ -42,6 +49,12 @@ _TRAIN_CSV = "train.csv"
 _TEST_CSV = "test.csv"
 _PACKAGE_ARTIFACTS_DIRNAME = "package_artifacts"
 _CV_SPLITS_DIRNAME = "cv_splits"
+_TRAINING_DIRNAME = "training"
+_TRAINING_CONFIG_FILENAME = "config.json"
+_TRAINING_OOF_FILENAME = "oof.csv"
+_TRAINING_EVAL_DIRNAME = "eval_off"
+_TRAINING_MODELS_DIRNAME = "models"
+_TRAINING_SUBMISSION_FILENAME = "submission.csv"
 
 
 def find_repo_root() -> Path:
@@ -164,3 +177,63 @@ def get_package_artifacts_dir() -> Path:
 def get_cv_splits_dir() -> Path:
     """Return ``<package_artifacts>/cv_splits`` (created on demand)."""
     return _ensure_dir(get_package_artifacts_dir() / _CV_SPLITS_DIRNAME)
+
+
+def get_training_artifacts_dir() -> Path:
+    """Return ``<storage>/artifacts/training`` (created on demand)."""
+    return _ensure_dir(get_artifacts_dir() / _TRAINING_DIRNAME)
+
+
+def claim_training_exp_dir(exp_name: str) -> Path:
+    """Create ``<storage>/artifacts/training/<exp_name>``. Raises if it exists."""
+    name = _section_stem(exp_name)
+    path = get_training_artifacts_dir() / name
+    if path.exists():
+        raise FileExistsError(
+            f"training experiment {name!r} already exists: {path}"
+        )
+    path.mkdir(parents=False, exist_ok=False)
+    return path
+
+
+def get_training_exp_dir(exp_name: str) -> Path:
+    """Return an existing ``<storage>/artifacts/training/<exp_name>`` directory."""
+    name = _section_stem(exp_name)
+    path = get_training_artifacts_dir() / name
+    if not path.is_dir():
+        raise FileNotFoundError(
+            f"training experiment {name!r} not found: {path}"
+        )
+    return path
+
+
+def get_training_config_path(exp_name: str) -> Path:
+    """Return ``<training>/<exp_name>/config.json``."""
+    return get_training_exp_dir(exp_name) / _TRAINING_CONFIG_FILENAME
+
+
+def get_training_oof_path(exp_name: str) -> Path:
+    """Return ``<training>/<exp_name>/oof.csv``."""
+    return get_training_exp_dir(exp_name) / _TRAINING_OOF_FILENAME
+
+
+def get_training_eval_dir(exp_name: str) -> Path:
+    """Return ``<training>/<exp_name>/eval_off`` (created on demand)."""
+    return _ensure_dir(get_training_exp_dir(exp_name) / _TRAINING_EVAL_DIRNAME)
+
+
+def get_training_models_dir(exp_name: str) -> Path:
+    """Return ``<training>/<exp_name>/models`` (created on demand)."""
+    return _ensure_dir(get_training_exp_dir(exp_name) / _TRAINING_MODELS_DIRNAME)
+
+
+def get_training_fold_model_path(exp_name: str, *, fold_id: int) -> Path:
+    """Return ``<training>/<exp_name>/models/fold_<fold_id>.joblib``."""
+    if type(fold_id) is not int or fold_id < 0:
+        raise ValueError(f"fold_id must be an int >= 0, got {fold_id!r}")
+    return get_training_models_dir(exp_name) / f"fold_{fold_id}.joblib"
+
+
+def get_training_submission_path(exp_name: str) -> Path:
+    """Return ``<training>/<exp_name>/submission.csv``."""
+    return get_training_exp_dir(exp_name) / _TRAINING_SUBMISSION_FILENAME

@@ -1,6 +1,6 @@
 """Cross-validation: alarm × target stratum, stratified k-fold, frozen splits.
 
-The alarm-flag union is a high-rate slab. A four-level stratum (alarm flag ×
+The alarm-flag union is a high-rate region. A four-level stratum (alarm flag ×
 ``is_fraud``) is the same composition as running ``StratifiedKFold`` on the
 flagged rows and on the unflagged rows separately, then concatenating fold
 ``i``. sklearn ``StratifiedKFold`` on the combined stratum does that in one
