@@ -41,28 +41,32 @@ def prepare_features(
     frame: pd.DataFrame,
     *,
     categories: dict[str, list] | None = None,
+    feature_columns: tuple[str, ...] = FEATURE_COLUMNS,
+    categorical_columns: tuple[str, ...] = CATEGORICAL_COLUMNS,
 ) -> pd.DataFrame:
     """Return the model matrix with categorical columns as pandas categories.
 
     ``categories`` freezes the levels from train so test uses the same codes.
+    ``feature_columns``/``categorical_columns`` default to the full baseline
+    schema; dataset versions pass their kept-column subset instead.
     """
     if ID_COLUMN not in frame.columns:
         raise ValueError(f"table is missing id column: {ID_COLUMN!r}")
-    missing = [name for name in FEATURE_COLUMNS if name not in frame.columns]
+    missing = [name for name in feature_columns if name not in frame.columns]
     if missing:
         raise ValueError(f"table missing feature columns: {missing}")
     allowed_extra = {ID_COLUMN, TARGET_COLUMN}
     unexpected = [
         name
         for name in frame.columns
-        if name not in FEATURE_COLUMNS and name not in allowed_extra
+        if name not in feature_columns and name not in allowed_extra
     ]
     if unexpected:
         raise ValueError(f"table has unexpected columns: {unexpected}")
-    features = frame.loc[:, list(FEATURE_COLUMNS)].copy()
-    n_cat = len(CATEGORICAL_COLUMNS)
+    features = frame.loc[:, list(feature_columns)].copy()
+    n_cat = len(categorical_columns)
     for i in range(n_cat):
-        name = CATEGORICAL_COLUMNS[i]
+        name = categorical_columns[i]
         if categories is None:
             features[name] = features[name].astype("category")
         else:
@@ -75,11 +79,15 @@ def prepare_features(
     return features
 
 
-def category_levels(features: pd.DataFrame) -> dict[str, list]:
+def category_levels(
+    features: pd.DataFrame,
+    *,
+    categorical_columns: tuple[str, ...] = CATEGORICAL_COLUMNS,
+) -> dict[str, list]:
     """JSON-ready category lists from a prepared train matrix."""
     levels: dict[str, list] = {}
-    n_cat = len(CATEGORICAL_COLUMNS)
+    n_cat = len(categorical_columns)
     for i in range(n_cat):
-        name = CATEGORICAL_COLUMNS[i]
+        name = categorical_columns[i]
         levels[name] = features[name].cat.categories.tolist()
     return levels

@@ -11,6 +11,11 @@ Layout::
                 /plots
                     /section_name
                 /tables
+            /dataset_versions
+                /version_name
+                    manifest.json
+                    folds.json
+                    data.parquet
             /training
                 /exp_name
                     config.json
@@ -49,6 +54,10 @@ _TRAIN_CSV = "train.csv"
 _TEST_CSV = "test.csv"
 _PACKAGE_ARTIFACTS_DIRNAME = "package_artifacts"
 _CV_SPLITS_DIRNAME = "cv_splits"
+_DATASET_VERSIONS_DIRNAME = "dataset_versions"
+_DATASET_VERSION_MANIFEST_FILENAME = "manifest.json"
+_DATASET_VERSION_FOLDS_FILENAME = "folds.json"
+_DATASET_VERSION_DATA_FILENAME = "data.parquet"
 _TRAINING_DIRNAME = "training"
 _TRAINING_CONFIG_FILENAME = "config.json"
 _TRAINING_OOF_FILENAME = "oof.csv"
@@ -177,6 +186,49 @@ def get_package_artifacts_dir() -> Path:
 def get_cv_splits_dir() -> Path:
     """Return ``<package_artifacts>/cv_splits`` (created on demand)."""
     return _ensure_dir(get_package_artifacts_dir() / _CV_SPLITS_DIRNAME)
+
+
+def get_dataset_versions_dir() -> Path:
+    """Return ``<storage>/artifacts/dataset_versions`` (created on demand)."""
+    return _ensure_dir(get_artifacts_dir() / _DATASET_VERSIONS_DIRNAME)
+
+
+def claim_dataset_version_dir(version_name: str) -> Path:
+    """Create ``<dataset_versions>/<version_name>``. Raises if it exists."""
+    name = _section_stem(version_name)
+    path = get_dataset_versions_dir() / name
+    if path.exists():
+        raise FileExistsError(
+            f"dataset version {name!r} already exists: {path}"
+        )
+    path.mkdir(parents=False, exist_ok=False)
+    return path
+
+
+def get_dataset_version_dir(version_name: str) -> Path:
+    """Return an existing ``<dataset_versions>/<version_name>`` directory."""
+    name = _section_stem(version_name)
+    path = get_dataset_versions_dir() / name
+    if not path.is_dir():
+        raise FileNotFoundError(
+            f"dataset version {name!r} not found: {path}"
+        )
+    return path
+
+
+def get_dataset_version_manifest_path(version_name: str) -> Path:
+    """Return ``<dataset_versions>/<version_name>/manifest.json``."""
+    return get_dataset_version_dir(version_name) / _DATASET_VERSION_MANIFEST_FILENAME
+
+
+def get_dataset_version_folds_path(version_name: str) -> Path:
+    """Return ``<dataset_versions>/<version_name>/folds.json``."""
+    return get_dataset_version_dir(version_name) / _DATASET_VERSION_FOLDS_FILENAME
+
+
+def get_dataset_version_data_path(version_name: str) -> Path:
+    """Return ``<dataset_versions>/<version_name>/data.parquet``."""
+    return get_dataset_version_dir(version_name) / _DATASET_VERSION_DATA_FILENAME
 
 
 def get_training_artifacts_dir() -> Path:

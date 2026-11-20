@@ -69,8 +69,11 @@ def stratified_kfold_ids(
     n_codes = len(unique_codes)
     for i in range(n_codes):
         if int(code_counts[i]) < n_splits:
-            code = int(unique_codes[i])
-            name = STRATUM_CODE_TO_NAME.get(code, str(code))
+            code = unique_codes[i]
+            if isinstance(code, np.integer):
+                name = STRATUM_CODE_TO_NAME.get(int(code), str(code))
+            else:
+                name = str(code)
             raise ValueError(
                 f"stratum {name!r} has {int(code_counts[i])} rows, "
                 f"need at least n_splits={n_splits}"

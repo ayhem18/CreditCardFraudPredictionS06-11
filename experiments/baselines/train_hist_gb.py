@@ -1,4 +1,8 @@
-"""Train HistGradientBoosting on frozen flag-stratified CV.
+"""Train HistGradientBoosting on a frozen stratified CV (all rows).
+
+Default scheme is flag_stratified (alarm x target); ``--cv alarm_profile``
+scores on the unified alarm x profile x target scheme shared with the
+region trainers, making the OOF tables of both approaches comparable.
 
 Writes OOF probabilities, one joblib per fold, and a test submission that
 averages the five fold models.
@@ -8,6 +12,8 @@ Does not score the run. Use ``eval_oof.py`` on the same ``--exp-name``.
 Usage::
 
     python experiments/baselines/train_hist_gb.py --exp-name hgb_baseline
+    python experiments/baselines/train_hist_gb.py --exp-name hgb_no_time \
+        --dataset-version no_time
 """
 
 from __future__ import annotations
@@ -26,6 +32,19 @@ from tqdm import tqdm
 
 from ccf_ml.cross_validation.constants import ID_COLUMN, TARGET_COLUMN
 from ccf_ml.cross_validation.flag_stratified import load_flag_stratified_cv
+from ccf_ml.region_modeling import load_alarm_profile_stratified_cv
+from ccf_ml.dataset_versions import DatasetVersion, load_dataset_version
+from ccf_ml.dataset_versions.transforms import apply_profile_context_to_test
+from ccf_ml.dataset_versions.constants import (
+    PROFILE_CONTEXT_SIZE_COLUMN,
+
+    AUTH_METHOD_COLUMN,
+    IS_NEW_MERCHANT_COLUMN,
+    MERCHANT_CATEGORY_COLUMN,
+    MERCHANT_RISK_SCORE_COLUMN,
+    RISK_CONTEXT_ADDED_COLUMNS,
+    RISK_CONTEXT_GROUPS_FILENAME,
+)
 from ccf_ml.file_utils import (
     claim_training_exp_dir,
     get_repo_root,
@@ -53,7 +72,10 @@ from training_io import (
 )
 
 MODEL_NAME = "sklearn.ensemble.HistGradientBoostingClassifier"
-CV_SCHEME = "flag_stratified"
+CV_SCHEMES = {
+    "flag": ("flag_stratified", load_flag_stratified_cv),
+    "alarm_profile": ("alarm_profile_stratified", load_alarm_profile_stratified_cv),
+}
 
 
 def main() -> None:
@@ -73,6 +95,24 @@ def main() -> None:
     parser.add_argument("--min-samples-leaf", type=int, default=20)
     parser.add_argument("--l2-regularization", type=float, default=0.0)
     parser.add_argument("--random-state", type=int, default=42)
+    parser.add_argument(
+        "--cv",
+        choices=sorted(CV_SCHEMES),
+        default="flag",
+        help=(
+            "Frozen fold scheme to score on: flag (alarm x target, all rows) "
+            "or alarm_profile (adds the 90-cell profile to the stratum; the "
+            "scheme shared with the region trainers)."
+        ),
+    )
+    parser.add_argument(
+        "--dataset-version",
+        default=None,
+        help=(
+            "Build the model matrix from this dataset version instead of "
+            "train.csv (same frozen folds; test drops the same columns)."
+        ),
+    )
     args = parser.parse_args()
 
     exp_name = args.exp_name
@@ -96,17 +136,39 @@ def main() -> None:
     print(f"model: {MODEL_NAME}")
     print(f"args: {model_args}")
 
-    train_path = get_train_csv_path()
-    print(f"train_csv: {_repo_relative(train_path)}")
-    frame = pd.read_csv(train_path)
-    cv = load_flag_stratified_cv()
+    dataset_version: DatasetVersion | None = None
+    if args.dataset_version is not None:
+        dataset_version = load_dataset_version(args.dataset_version)
+    feature_columns, categorical_columns, numeric_columns = _column_lists(
+        dataset_version=dataset_version,
+    )
+
+    if dataset_version is None:
+        train_path = get_train_csv_path()
+        print(f"train_csv: {_repo_relative(train_path)}")
+        frame = pd.read_csv(train_path)
+    else:
+        manifest = dataset_version.manifest
+        print(f"dataset_version: {manifest.name}")
+        print(f"  drop_columns: {list(manifest.drop_columns)}")
+        print(f"  data_sha256: {manifest.data_sha256}")
+        frame = dataset_version.frame
+    cv_scheme, load_cv = CV_SCHEMES[args.cv]
+    cv = load_cv()
+    print(f"cv: {cv_scheme} {cv.n_splits}-fold, n_rows={cv.n_rows}")
     n_rows = len(frame)
     if n_rows != cv.n_rows:
         raise ValueError(
             f"train rows {n_rows} do not match cv n_rows {cv.n_rows}"
         )
-    features = prepare_features(frame)
-    categories = category_levels(features)
+    features = prepare_features(
+        frame,
+        feature_columns=feature_columns,
+        categorical_columns=categorical_columns,
+    )
+    categories = category_levels(
+        features, categorical_columns=categorical_columns
+    )
     target = frame[TARGET_COLUMN].to_numpy()
     y = target.astype(np.int64)
     if not np.all(target == y):
@@ -119,9 +181,18 @@ def main() -> None:
         payload={
             "exp_name": exp_name,
             "model": MODEL_NAME,
+            "dataset_version": (
+                {
+                    "name": dataset_version.manifest.name,
+                    "drop_columns": list(dataset_version.manifest.drop_columns),
+                    "data_sha256": dataset_version.manifest.data_sha256,
+                }
+                if dataset_version is not None
+                else None
+            ),
             "args": model_args,
             "cv": {
-                "scheme": CV_SCHEME,
+                "scheme": cv_scheme,
                 "n_splits": cv.n_splits,
                 "random_state": cv.random_state,
                 "shuffle": cv.shuffle,
@@ -129,9 +200,9 @@ def main() -> None:
             "columns": {
                 "id": ID_COLUMN,
                 "target": TARGET_COLUMN,
-                "features": list(FEATURE_COLUMNS),
-                "categorical": list(CATEGORICAL_COLUMNS),
-                "numeric": list(NUMERIC_COLUMNS),
+                "features": list(feature_columns),
+                "categorical": list(categorical_columns),
+                "numeric": list(numeric_columns),
             },
             "categories": categories,
         },
@@ -191,7 +262,20 @@ def main() -> None:
     test_path = get_test_csv_path()
     print(f"test_csv: {_repo_relative(test_path)}")
     test_frame = pd.read_csv(test_path)
-    test_features = prepare_features(test_frame, categories=categories)
+    if dataset_version is not None:
+        groups_path = dataset_version.dir / RISK_CONTEXT_GROUPS_FILENAME
+        if groups_path.exists():
+            test_frame = _apply_risk_context_to_test(test_frame, groups_path)
+        if PROFILE_CONTEXT_SIZE_COLUMN in feature_columns:
+            train_raw = pd.read_csv(get_train_csv_path())
+            test_frame = apply_profile_context_to_test(test_frame, train_raw)
+        test_frame = test_frame.loc[:, [ID_COLUMN] + list(feature_columns)]
+    test_features = prepare_features(
+        test_frame,
+        categories=categories,
+        feature_columns=feature_columns,
+        categorical_columns=categorical_columns,
+    )
     n_test = len(test_features)
     test_prob = np.zeros(n_test, dtype=np.float64)
     t_sub = time.perf_counter()
@@ -212,6 +296,56 @@ def main() -> None:
         f"n={n_test} in {time.perf_counter() - t_sub:.1f}s"
     )
     print("done")
+
+
+def _apply_risk_context_to_test(
+    test_frame: pd.DataFrame, groups_path: Path
+) -> pd.DataFrame:
+    """Map test rows onto the full-train (merchant, auth) risk statistics.
+
+    Mirrors the train-side transform with full-train statistics: every row
+    gains the four group aggregate columns, and new-merchant rows get the
+    group mean in place of their raw risk score.
+    """
+    key_columns = [MERCHANT_CATEGORY_COLUMN, AUTH_METHOD_COLUMN]
+    groups = pd.read_parquet(groups_path)
+    merged = test_frame.merge(
+        groups.loc[:, key_columns + list(RISK_CONTEXT_ADDED_COLUMNS)],
+        on=key_columns,
+        how="left",
+        validate="many_to_one",
+    )
+    if merged[list(RISK_CONTEXT_ADDED_COLUMNS)].isna().to_numpy().any():
+        raise ValueError(
+            "test rows have (merchant_category, auth_method) groups absent "
+            f"from {RISK_CONTEXT_GROUPS_FILENAME}"
+        )
+    is_new = merged[IS_NEW_MERCHANT_COLUMN].to_numpy(dtype=bool)
+    raw_risk = merged[MERCHANT_RISK_SCORE_COLUMN].to_numpy(dtype=np.float64)
+    merged[MERCHANT_RISK_SCORE_COLUMN] = np.where(
+        is_new, merged["risk_group_mean"], raw_risk
+    )
+    return merged
+
+
+def _column_lists(
+    *,
+    dataset_version: DatasetVersion | None,
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    """Feature/categorical/numeric lists for a version or the full schema."""
+    if dataset_version is None:
+        return FEATURE_COLUMNS, CATEGORICAL_COLUMNS, NUMERIC_COLUMNS
+    kept = dataset_version.manifest.kept_columns
+    feature_columns = tuple(
+        name for name in kept if name not in (ID_COLUMN, TARGET_COLUMN)
+    )
+    categorical_columns = tuple(
+        name for name in CATEGORICAL_COLUMNS if name in feature_columns
+    )
+    numeric_columns = tuple(
+        name for name in NUMERIC_COLUMNS if name in feature_columns
+    )
+    return feature_columns, categorical_columns, numeric_columns
 
 
 def _positions(
