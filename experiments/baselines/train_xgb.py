@@ -42,10 +42,33 @@ from ccf_ml.dataset_versions.constants import (
     MERCHANT_CATEGORY_COLUMN,
     MERCHANT_RISK_SCORE_COLUMN,
     PROFILE_CONTEXT_SIZE_COLUMN,
+    ANCHOR_COMBINED_FILENAME,
+    ANCHOR_FREQ_FILENAME,
+    ANCHOR_RATE_FILENAME,
+    ANCHOR_TILT_FILENAME,
+    ANCHOR_V2_RATES_FILENAME,
+    ANCHOR_V3_RATES_FILENAME,
+    IS_ALARM_COLUMN,
+    N_ALARM_FLAGS_COLUMN,
+    SLOT_REFS_FILENAME,
+    SLOT_Z_STATS_FILENAME,
     RISK_CONTEXT_ADDED_COLUMNS,
     RISK_CONTEXT_GROUPS_FILENAME,
 )
-from ccf_ml.dataset_versions.transforms import apply_profile_context_to_test
+from ccf_ml.dataset_versions.transforms import (
+    apply_grid_slots_to_test,
+    apply_profile_context_to_test,
+    apply_anchor_combined_to_test,
+    apply_anchor_freq_to_test,
+    apply_anchor_rate_to_test,
+    apply_anchor_tilt_to_test,
+    apply_anchor_v2_rates_to_test,
+    apply_anchor_v3_rates_to_test,
+    attach_is_alarm,
+    attach_n_alarm_flags,
+    apply_slot_refs_to_test,
+    apply_slot_z_to_test,
+)
 from ccf_ml.file_utils import (
     claim_training_exp_dir,
     get_repo_root,
@@ -274,6 +297,41 @@ def main() -> None:
         if PROFILE_CONTEXT_SIZE_COLUMN in feature_columns:
             train_raw = pd.read_csv(get_train_csv_path())
             test_frame = apply_profile_context_to_test(test_frame, train_raw)
+        if any(name.startswith("grid_") for name in feature_columns):
+            test_frame = apply_grid_slots_to_test(
+                test_frame,
+                include_exact=any(
+                    name.startswith("grid_value_") for name in feature_columns
+                ),
+            )
+        slot_z_path = dataset_version.dir / SLOT_Z_STATS_FILENAME
+        if slot_z_path.exists():
+            test_frame = apply_slot_z_to_test(test_frame, slot_z_path)
+        slot_refs_path = dataset_version.dir / SLOT_REFS_FILENAME
+        if slot_refs_path.exists():
+            test_frame = apply_slot_refs_to_test(test_frame, slot_refs_path)
+        anchor_freq_path = dataset_version.dir / ANCHOR_FREQ_FILENAME
+        if anchor_freq_path.exists():
+            test_frame = apply_anchor_freq_to_test(test_frame, anchor_freq_path)
+        anchor_rate_path = dataset_version.dir / ANCHOR_RATE_FILENAME
+        if anchor_rate_path.exists():
+            test_frame = apply_anchor_rate_to_test(test_frame, anchor_rate_path)
+        anchor_v2_path = dataset_version.dir / ANCHOR_V2_RATES_FILENAME
+        if anchor_v2_path.exists():
+            test_frame = apply_anchor_v2_rates_to_test(test_frame, anchor_v2_path)
+        anchor_tilt_path = dataset_version.dir / ANCHOR_TILT_FILENAME
+        if anchor_tilt_path.exists():
+            test_frame = apply_anchor_tilt_to_test(test_frame, anchor_tilt_path)
+        anchor_combined_path = dataset_version.dir / ANCHOR_COMBINED_FILENAME
+        if anchor_combined_path.exists():
+            test_frame = apply_anchor_combined_to_test(test_frame, anchor_combined_path)
+        anchor_v3_path = dataset_version.dir / ANCHOR_V3_RATES_FILENAME
+        if anchor_v3_path.exists():
+            test_frame = apply_anchor_v3_rates_to_test(test_frame, anchor_v3_path)
+        if IS_ALARM_COLUMN in feature_columns:
+            test_frame = attach_is_alarm(test_frame)
+        if N_ALARM_FLAGS_COLUMN in feature_columns:
+            test_frame = attach_n_alarm_flags(test_frame)
         test_frame = test_frame.loc[:, [ID_COLUMN] + list(feature_columns)]
     # note: no frozen categories here - the config stores the post-cast
     # string levels, and feeding them back into prepare_features would map
@@ -289,6 +347,15 @@ def main() -> None:
     )
     for column in categorical_columns:
         train_levels = pd.Categorical(features[column]).categories
+        if column.startswith("grid_"):
+            # grid columns legitimately contain levels unseen in train (new
+            # anchor values / slots appear in test). Re-anchor the codes onto
+            # the training levels so unseen values become missing; those rows
+            # still carry the raw numeric column.
+            test_features[column] = pd.Categorical(
+                test_features[column], categories=train_levels
+            )
+            continue
         test_levels = pd.Categorical(test_features[column]).categories
         if not test_levels.equals(train_levels):
             raise ValueError(

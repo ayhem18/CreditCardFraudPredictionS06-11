@@ -8,14 +8,25 @@ order; id and target columns pass through untouched.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Callable
 
 import numpy as np
 import pandas as pd
 
-from ccf_ml.cross_validation.constants import ALARM_FLAG_COLUMNS, ID_COLUMN
+from ccf_ml.cross_validation.alarm import alarm_flag_mask, as_boolean_array
+from ccf_ml.cross_validation.constants import (
+    ALARM_FLAG_COLUMNS,
+    ID_COLUMN,
+    TARGET_COLUMN,
+)
 from ccf_ml.cross_validation.flag_stratified import FlagStratifiedCv
 from ccf_ml.dataset_versions.constants import (
+    GRID_EXACT_VALUE_COLUMNS,
+    GRID_NUMERIC_COLUMNS,
+    GRID_SLOTS_EXACT_TRANSFORM,
+    GRID_SLOTS_TRANSFORM,
+    GRID_VALUE_PREFIX,
     IS_NEW_MERCHANT_COLUMN,
     MERCHANT_RISK_SCORE_COLUMN,
     PROFILE_BASE_COLUMNS,
@@ -28,6 +39,45 @@ from ccf_ml.dataset_versions.constants import (
     RISK_CONTEXT_GROUP_COLUMNS,
     RISK_CONTEXT_GROUPS_FILENAME,
     RISK_CONTEXT_TRANSFORM,
+    SLOT_CENTROID_SHRINKAGE,
+    SLOT_MIN_ANCHOR_ROWS,
+    SLOT_REFS_FILENAME,
+    SLOT_REFS_TRANSFORM,
+    SLOT_Z_STATS_FILENAME,
+    SLOT_Z_TRANSFORM,
+    ANCHOR_FREQ_FILENAME,
+    ANCHOR_FREQ_TRANSFORM,
+    ANCHOR_FULL_TRANSFORM,
+    ANCHOR_RATE_FILENAME,
+    ANCHOR_RATE_SHRINKAGE,
+    ANCHOR_V2_IS_ALARM_TRANSFORM,
+    ANCHOR_V2_N_ALARM_TRANSFORM,
+    ANCHOR_V2_RATES_FILENAME,
+    N_ALARM_FLAGS_COLUMN,
+    ANCHOR_V2_TRANSFORM,
+    IS_ALARM_COLUMN,
+    ANCHOR_V2C_TRANSFORM,
+    ANCHOR_V2T_TRANSFORM,
+    ANCHOR_COMBINED_FILENAME,
+    ANCHOR_TILT_FILENAME,
+    ANCHOR_V3_RATES_FILENAME,
+    ANCHOR_V3_TRANSFORM,
+    ARATE10A_PREFIX,
+    ARATE10_PREFIX,
+    COMBINED_RATE_COLUMNS,
+    COMBINED_RATE_SHRINKAGE,
+    ANCHOR_COMBINED_COLUMN,
+    NATIVE_RATE_COLUMNS,
+    SMALLINT_RATE_COLUMNS,
+    TILT_COLUMNS,
+    anchor_freq_column,
+    anchor_rate_column,
+    anchor_tilt_column,
+    grid_anchor_column,
+    grid_slot_column,
+    grid_value_column,
+    slot_lda_column,
+    slot_z_column,
 )
 
 TransformFn = Callable[
@@ -351,10 +401,1082 @@ def apply_profile_context_to_test(
     return out
 
 
+def _add_grid_columns(
+    target: pd.DataFrame, *, include_exact: bool
+) -> pd.DataFrame:
+    """Return a copy with grid decomposition columns for the grid numerics.
+
+    ``grid_anchor_<col>`` = floor(x); ``grid_slot_<col>`` = cents above the
+    anchor (0..99; the 0.1-grid columns only use multiples of 10). Values
+    must sit on the exact 2-decimal grid (verified up to 2e-3 float noise);
+    anything further off-grid raises.
+    """
+    missing = [name for name in GRID_NUMERIC_COLUMNS if name not in target.columns]
+    if missing:
+        raise ValueError(f"grid transform is missing columns: {missing}")
+    out = target.copy()
+    for column in GRID_NUMERIC_COLUMNS:
+        x = out[column].to_numpy(dtype=np.float64)
+        off_grid = np.abs(x * 100.0 - np.rint(x * 100.0))
+        if off_grid.max() > 0.5:
+            raise ValueError(
+                f"{column} has values further than half a cent off the "
+                f"2-decimal grid (max deviation {off_grid.max():.4f})"
+            )
+        anchor = np.floor(x)
+        out[grid_anchor_column(column)] = anchor.astype(np.int64)
+        out[grid_slot_column(column)] = np.clip(
+            np.rint((x - anchor) * 100.0), 0, 99
+        ).astype(np.int64)
+    if include_exact:
+        for column in GRID_EXACT_VALUE_COLUMNS:
+            x = out[column].to_numpy(dtype=np.float64)
+            out[grid_value_column(column)] = np.rint(x * 10.0).astype(np.int64)
+    return out
+
+
+def grid_slots_transform(
+    frame: pd.DataFrame, folds: FlagStratifiedCv
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """Add the grid anchor/slot columns for the six continuous numerics.
+
+    Deterministic per-row (no fold-train state), so the frozen partition is
+    unused; the signature matches the transform contract.
+    """
+    return _add_grid_columns(frame, include_exact=False), {}
+
+
+def grid_slots_exact_transform(
+    frame: pd.DataFrame, folds: FlagStratifiedCv
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """Grid slots plus exact-grid-value ids for the 0.1-grid columns.
+
+    velocity_score and merchant_risk_score have no cent-level structure
+    (~11 slots, all multiples of 10 cents), so their full grid value is a
+    small id space (674 / 959 levels) worth memorizing directly.
+    """
+    return _add_grid_columns(frame, include_exact=True), {}
+
+
+def apply_grid_slots_to_test(
+    test_frame: pd.DataFrame, *, include_exact: bool
+) -> pd.DataFrame:
+    """Test-side counterpart of the grid transforms (same deterministic rule)."""
+    return _add_grid_columns(test_frame, include_exact=include_exact)
+
+
+def _anchor_slot(frame: pd.DataFrame) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """(anchor, slot) integer arrays per grid numeric column."""
+    out: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+    for column in GRID_NUMERIC_COLUMNS:
+        x = frame[column].to_numpy(dtype=np.float64)
+        anchor = np.floor(x)
+        slot = np.clip(np.rint((x - anchor) * 100.0), 0, 99)
+        out[column] = (anchor.astype(np.int64), slot.astype(np.int64))
+    return out
+
+
+def _map_by_anchor(
+    values: np.ndarray, table: dict[int, float], fallback: float
+) -> np.ndarray:
+    """Vectorized anchor->float lookup with a global fallback."""
+    return (
+        pd.Series(values).map(table).fillna(fallback).to_numpy(dtype=np.float64)
+    )
+
+
+def _slot_z_table(
+    pairs: dict[str, tuple[np.ndarray, np.ndarray]],
+) -> pd.DataFrame:
+    """Long per-(column, anchor) slot mean/std table; anchor -1 is global."""
+    rows: list[dict[str, object]] = []
+    for column, (anchor, slot) in pairs.items():
+        grouped = pd.Series(slot).groupby(anchor)
+        means = grouped.mean()
+        stds = grouped.std(ddof=0)
+        counts = grouped.size()
+        rows.append(
+            {
+                "column": column,
+                "anchor": -1,
+                "slot_mean": float(slot.mean()),
+                "slot_std": float(slot.std()),
+                "n_rows": len(slot),
+            }
+        )
+        for anchor_value in means.index:
+            n = int(counts.loc[anchor_value])
+            if n < SLOT_MIN_ANCHOR_ROWS:
+                continue
+            rows.append(
+                {
+                    "column": column,
+                    "anchor": int(anchor_value),
+                    "slot_mean": float(means.loc[anchor_value]),
+                    "slot_std": float(stds.loc[anchor_value]),
+                    "n_rows": n,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _apply_slot_z(
+    target: pd.DataFrame,
+    pairs: dict[str, tuple[np.ndarray, np.ndarray]],
+    table: pd.DataFrame,
+) -> pd.DataFrame:
+    """Add slotz_<col> = (slot - mean_a) / std_a using a stats table."""
+    out = target.copy()
+    global_rows = table[table["anchor"] == -1].set_index("column")
+    for column, (anchor, slot) in pairs.items():
+        global_mean = float(global_rows.loc[column, "slot_mean"])
+        global_std = float(global_rows.loc[column, "slot_std"])
+        sub = table[(table["column"] == column) & (table["anchor"] != -1)]
+        mean_map = dict(zip(sub["anchor"], sub["slot_mean"]))
+        std_map = dict(zip(sub["anchor"], sub["slot_std"]))
+        means = _map_by_anchor(anchor, mean_map, global_mean)
+        stds = _map_by_anchor(anchor, std_map, global_std)
+        stds = np.where(stds < 1e-9, global_std, stds)
+        out[slot_z_column(column)] = (slot - means) / stds
+    return out
+
+
+def slot_z_transform(
+    frame: pd.DataFrame, folds: FlagStratifiedCv
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """Target-free z-score of the fractional slot within its anchor.
+
+    ``slotz_<col> = (slot - mean(slot | anchor)) / std(slot | anchor)``
+    with the anchor's statistics from the full training frame (no labels
+    involved); anchors with fewer than ``SLOT_MIN_ANCHOR_ROWS`` rows and
+    unseen anchors fall back to the column's global mean/std. Exposes the
+    verified within-anchor decimal structure as one numeric threshold.
+    """
+    pairs = _anchor_slot(frame)
+    table = _slot_z_table(pairs)
+    out = _apply_slot_z(frame, pairs, table)
+    return out, {SLOT_Z_STATS_FILENAME: table}
+
+
+def _slot_centroids(
+    pairs: dict[str, tuple[np.ndarray, np.ndarray]],
+    target: np.ndarray,
+) -> pd.DataFrame:
+    """Long per-(column, anchor) shrunk fraud/clean slot centroids."""
+    shrink = SLOT_CENTROID_SHRINKAGE
+    rows: list[dict[str, object]] = []
+    for column, (anchor, slot) in pairs.items():
+        stats = pd.DataFrame({"anchor": anchor, "slot": slot, "y": target})
+        fraud = stats[stats["y"]].groupby("anchor")["slot"]
+        clean = stats[~stats["y"]].groupby("anchor")["slot"]
+        fraud_mean = fraud.mean()
+        fraud_n = fraud.size()
+        clean_mean = clean.mean()
+        clean_n = clean.size()
+        global_fraud = float(slot[target].mean())
+        global_clean = float(slot[~target].mean())
+        rows.append(
+            {
+                "column": column,
+                "anchor": -1,
+                "fraud_centroid": global_fraud,
+                "clean_centroid": global_clean,
+                "n_fraud": int(target.sum()),
+                "n_clean": int((~target).sum()),
+            }
+        )
+        for anchor_value in fraud_mean.index.union(clean_mean.index):
+            n_fraud = int(fraud_n.get(anchor_value, 0))
+            n_clean = int(clean_n.get(anchor_value, 0))
+            local_fraud = float(fraud_mean.get(anchor_value, global_fraud))
+            local_clean = float(clean_mean.get(anchor_value, global_clean))
+            rows.append(
+                {
+                    "column": column,
+                    "anchor": int(anchor_value),
+                    "fraud_centroid": (
+                        n_fraud * local_fraud + shrink * global_fraud
+                    )
+                    / (n_fraud + shrink),
+                    "clean_centroid": (
+                        n_clean * local_clean + shrink * global_clean
+                    )
+                    / (n_clean + shrink),
+                    "n_fraud": n_fraud,
+                    "n_clean": n_clean,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _apply_slot_refs(
+    target: pd.DataFrame,
+    pairs: dict[str, tuple[np.ndarray, np.ndarray]],
+    table: pd.DataFrame,
+) -> pd.DataFrame:
+    """Add slotlda_<col> = |slot - clean_c| - |slot - fraud_c| per anchor."""
+    out = target.copy()
+    global_rows = table[table["anchor"] == -1].set_index("column")
+    for column, (anchor, slot) in pairs.items():
+        global_fraud = float(global_rows.loc[column, "fraud_centroid"])
+        global_clean = float(global_rows.loc[column, "clean_centroid"])
+        sub = table[(table["column"] == column) & (table["anchor"] != -1)]
+        fraud_map = dict(zip(sub["anchor"], sub["fraud_centroid"]))
+        clean_map = dict(zip(sub["anchor"], sub["clean_centroid"]))
+        fraud_c = _map_by_anchor(anchor, fraud_map, global_fraud)
+        clean_c = _map_by_anchor(anchor, clean_map, global_clean)
+        out[slot_lda_column(column)] = np.abs(slot - clean_c) - np.abs(
+            slot - fraud_c
+        )
+    return out
+
+
+def slot_refs_transform(
+    frame: pd.DataFrame, folds: FlagStratifiedCv
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """Fold-safe per-anchor slot centroids; positive = closer to fraud.
+
+    The verification battery found fraud-vs-clean fractional-slot shifts
+    within anchors (up to |z| = 10). Each row's feature is
+    ``|slot - clean_centroid(anchor)| - |slot - fraud_centroid(anchor)|``,
+    centroids computed on the row's fold-training part only, shrunk toward
+    the global class centroids with k = ``SLOT_CENTROID_SHRINKAGE`` (most
+    anchors hold few frauds). Extra payload carries full-train centroids
+    for test rows.
+    """
+    target = frame[TARGET_COLUMN].to_numpy(dtype=bool)
+    pairs = _anchor_slot(frame)
+    fold_of = _fold_of_row(frame, folds)
+    pieces: list[pd.DataFrame] = []
+    for fold_id in range(folds.n_splits):
+        sel = fold_of == fold_id
+        train_part = frame.loc[~sel]
+        train_pairs = _anchor_slot(train_part)
+        train_target = train_part[TARGET_COLUMN].to_numpy(dtype=bool)
+        table = _slot_centroids(train_pairs, train_target)
+        val_pairs = {
+            column: (pairs[column][0][sel], pairs[column][1][sel])
+            for column in pairs
+        }
+        pieces.append(_apply_slot_refs(frame.loc[sel], val_pairs, table))
+    features = pd.concat(pieces)
+    if len(features) != len(frame) or features.index.duplicated().any():
+        raise ValueError("slot_refs features lost or duplicated rows")
+    out = frame.copy()
+    for column in features.columns:
+        out.loc[features.index, column] = features[column]
+        if out[column].isna().any():
+            raise ValueError(f"slot feature {column!r} has NaNs")
+    full_table = _slot_centroids(pairs, target)
+    return out, {SLOT_REFS_FILENAME: full_table}
+
+
+def apply_slot_z_to_test(
+    test_frame: pd.DataFrame, stats_path: Path
+) -> pd.DataFrame:
+    """Test-side slot_z using the version's frozen stats table."""
+    table = pd.read_parquet(stats_path)
+    pairs = _anchor_slot(test_frame)
+    return _apply_slot_z(test_frame, pairs, table)
+
+
+def apply_slot_refs_to_test(
+    test_frame: pd.DataFrame, refs_path: Path
+) -> pd.DataFrame:
+    """Test-side slot_lda using the version's full-train centroids."""
+    table = pd.read_parquet(refs_path)
+    pairs = _anchor_slot(test_frame)
+    return _apply_slot_refs(test_frame, pairs, table)
+
+
+def _apply_anchor_freq(
+    target: pd.DataFrame,
+    anchors: dict[str, np.ndarray],
+    counts: pd.DataFrame,
+) -> pd.DataFrame:
+    """Add afreq_<col> = log1p(train count of the row's anchor)."""
+    out = target.copy()
+    for column, anchor in anchors.items():
+        sub = counts[counts["column"] == column]
+        count_map = dict(zip(sub["anchor"], sub["n_rows"]))
+        n = (
+            pd.Series(anchor)
+            .map(count_map)
+            .fillna(0.0)
+            .to_numpy(dtype=np.float64)
+        )
+        out[anchor_freq_column(column)] = np.log1p(n)
+    return out
+
+
+def anchor_freq_transform(
+    frame: pd.DataFrame, folds: FlagStratifiedCv
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """Target-free log train-frequency of each numeric's floor anchor.
+
+    Rarity is non-monotone in value, so trees cannot carve it from the raw
+    floats; the screen found marginal fraud AUC 0.63 on velocity/risk
+    anchors and 0.55-0.56 on hours/amount. Counts come from the training
+    frame only (no labels); test rows read the same table, unseen anchors
+    scoring log1p(0).
+    """
+    anchors = {
+        column: np.floor(frame[column].to_numpy(dtype=np.float64)).astype(np.int64)
+        for column in GRID_NUMERIC_COLUMNS
+    }
+    rows: list[dict[str, object]] = []
+    for column, anchor in anchors.items():
+        counts = pd.Series(anchor).value_counts()
+        for anchor_value, n in counts.items():
+            rows.append(
+                {"column": column, "anchor": int(anchor_value), "n_rows": int(n)}
+            )
+    table = pd.DataFrame(rows)
+    out = _apply_anchor_freq(frame, anchors, table)
+    return out, {ANCHOR_FREQ_FILENAME: table}
+
+
+def apply_anchor_freq_to_test(
+    test_frame: pd.DataFrame, counts_path: Path
+) -> pd.DataFrame:
+    """Test-side anchor frequency using the version's frozen train counts."""
+    table = pd.read_parquet(counts_path)
+    anchors = {
+        column: np.floor(test_frame[column].to_numpy(dtype=np.float64)).astype(np.int64)
+        for column in GRID_NUMERIC_COLUMNS
+    }
+    return _apply_anchor_freq(test_frame, anchors, table)
+
+
+def _anchor_rate_table(
+    anchors: dict[str, np.ndarray], target: np.ndarray, *, shrink: int
+) -> pd.DataFrame:
+    """Long per-(column, anchor) shrunk fraud-rate table."""
+    global_rate = float(target.mean())
+    rows: list[dict[str, object]] = []
+    for column, anchor in anchors.items():
+        stats = pd.DataFrame({"anchor": anchor, "y": target})
+        agg = stats.groupby("anchor")["y"].agg(["sum", "size"])
+        for anchor_value, row in agg.iterrows():
+            rows.append(
+                {
+                    "column": column,
+                    "anchor": int(anchor_value),
+                    "fraud_rate": (float(row["sum"]) + shrink * global_rate)
+                    / (float(row["size"]) + shrink),
+                    "n_rows": int(row["size"]),
+                    "n_fraud": int(row["sum"]),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _apply_anchor_rate(
+    target_frame: pd.DataFrame,
+    anchors: dict[str, np.ndarray],
+    table: pd.DataFrame,
+    *,
+    fallback_rate: float,
+) -> pd.DataFrame:
+    """Add arate_<col> = shrunk fraud rate of the row's anchor."""
+    out = target_frame.copy()
+    for column, anchor in anchors.items():
+        sub = table[table["column"] == column]
+        rate_map = dict(zip(sub["anchor"], sub["fraud_rate"]))
+        rates = (
+            pd.Series(anchor)
+            .map(rate_map)
+            .fillna(fallback_rate)
+            .to_numpy(dtype=np.float64)
+        )
+        out[anchor_rate_column(column)] = rates
+    return out
+
+
+def anchor_full_transform(
+    frame: pd.DataFrame, folds: FlagStratifiedCv
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """Anchor frequency plus fold-safe shrunk anchor fraud rate.
+
+    Adds afreq_<col> (target-free log train frequency, as
+    :func:`anchor_freq_transform`) and arate_<col> = (frauds + k*global) /
+    (rows + k) of the row's anchor, k = ``ANCHOR_RATE_SHRINKAGE``, computed
+    on the row's fold-training part only; test rows use full-train rates
+    from the payload.
+    """
+    shrink = ANCHOR_RATE_SHRINKAGE
+    anchors = {
+        column: np.floor(frame[column].to_numpy(dtype=np.float64)).astype(np.int64)
+        for column in GRID_NUMERIC_COLUMNS
+    }
+    target = frame[TARGET_COLUMN].to_numpy(dtype=bool)
+    freq_rows: list[dict[str, object]] = []
+    for column, anchor in anchors.items():
+        counts = pd.Series(anchor).value_counts()
+        for anchor_value, n in counts.items():
+            freq_rows.append(
+                {"column": column, "anchor": int(anchor_value), "n_rows": int(n)}
+            )
+    freq_table = pd.DataFrame(freq_rows)
+    out = _apply_anchor_freq(frame, anchors, freq_table)
+
+    fold_of = _fold_of_row(frame, folds)
+    global_rate = float(target.mean())
+    pieces: list[pd.DataFrame] = []
+    for fold_id in range(folds.n_splits):
+        sel = fold_of == fold_id
+        train_part = frame.loc[~sel]
+        train_anchors = {
+            column: np.floor(
+                train_part[column].to_numpy(dtype=np.float64)
+            ).astype(np.int64)
+            for column in GRID_NUMERIC_COLUMNS
+        }
+        table = _anchor_rate_table(
+            train_anchors,
+            train_part[TARGET_COLUMN].to_numpy(dtype=bool),
+            shrink=shrink,
+        )
+        val_anchors = {column: anchors[column][sel] for column in anchors}
+        pieces.append(
+            _apply_anchor_rate(
+                frame.loc[sel], val_anchors, table, fallback_rate=global_rate
+            )
+        )
+    features = pd.concat(pieces)
+    if len(features) != len(frame) or features.index.duplicated().any():
+        raise ValueError("anchor rate features lost or duplicated rows")
+    for column in features.columns:
+        out.loc[features.index, column] = features[column]
+        if out[column].isna().any():
+            raise ValueError(f"anchor feature {column!r} has NaNs")
+    full_table = _anchor_rate_table(anchors, target, shrink=shrink)
+    extras = {
+        ANCHOR_FREQ_FILENAME: freq_table,
+        ANCHOR_RATE_FILENAME: full_table,
+    }
+    return out, extras
+
+
+def apply_anchor_rate_to_test(
+    test_frame: pd.DataFrame, rate_path: Path
+) -> pd.DataFrame:
+    """Test-side anchor fraud rate using the version's full-train table."""
+    table = pd.read_parquet(rate_path)
+    anchors = {
+        column: np.floor(test_frame[column].to_numpy(dtype=np.float64)).astype(np.int64)
+        for column in GRID_NUMERIC_COLUMNS
+    }
+    fallback = float(table["fraud_rate"].dropna().mean())
+    return _apply_anchor_rate(
+        test_frame, anchors, table, fallback_rate=fallback
+    )
+
+
+def _rate_keys(source: pd.Series, mode: str) -> np.ndarray:
+    """Integer key per row for a rate group: floor / tenth / value."""
+    values = source.to_numpy(dtype=np.float64)
+    if mode == "floor":
+        return np.floor(values).astype(np.int64)
+    if mode == "tenth":
+        return np.rint(values * 10.0).astype(np.int64)
+    return np.rint(values).astype(np.int64)
+
+
+def _v2_rate_sources() -> tuple[tuple[str, str, str], ...]:
+    """(output column, source column, key mode) for the v2 rate family."""
+    sources = [
+        (anchor_rate_column(column), column, "floor")
+        for column in GRID_NUMERIC_COLUMNS
+    ]
+    sources += [
+        (ARATE10_PREFIX + column, column, "tenth")
+        for column in NATIVE_RATE_COLUMNS
+    ]
+    sources += [
+        (anchor_rate_column(column), column, "value")
+        for column in SMALLINT_RATE_COLUMNS
+    ]
+    return tuple(sources)
+
+
+def _v2_rate_table(
+    frame: pd.DataFrame,
+    sources: tuple[tuple[str, str, str], ...],
+    target: np.ndarray,
+    *,
+    shrink: int,
+) -> pd.DataFrame:
+    """Long per-(output column, key) shrunk fraud-rate table."""
+    global_rate = float(target.mean())
+    rows: list[dict[str, object]] = []
+    for out_column, source_column, mode in sources:
+        keys = _rate_keys(frame[source_column], mode)
+        stats = pd.DataFrame({"key": keys, "y": target})
+        agg = stats.groupby("key")["y"].agg(["sum", "size"])
+        for key_value, row in agg.iterrows():
+            rows.append(
+                {
+                    "output": out_column,
+                    "key": int(key_value),
+                    "fraud_rate": (float(row["sum"]) + shrink * global_rate)
+                    / (float(row["size"]) + shrink),
+                    "n_rows": int(row["size"]),
+                    "n_fraud": int(row["sum"]),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _apply_v2_rates(
+    target_frame: pd.DataFrame,
+    keys_by_output: dict[str, np.ndarray],
+    table: pd.DataFrame,
+    *,
+    fallback_rate: float,
+) -> pd.DataFrame:
+    """Add each rate output column from its (output, key) table."""
+    out = target_frame.copy()
+    for out_column, keys in keys_by_output.items():
+        sub = table[table["output"] == out_column]
+        rate_map = dict(zip(sub["key"], sub["fraud_rate"]))
+        rates = (
+            pd.Series(keys)
+            .map(rate_map)
+            .fillna(fallback_rate)
+            .to_numpy(dtype=np.float64)
+        )
+        out[out_column] = rates
+    return out
+
+
+def anchor_v2_transform(
+    frame: pd.DataFrame, folds: FlagStratifiedCv
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """Frequency plus the full fold-safe rate family (anchor_v2).
+
+    Adds afreq_<col> (target-free log train frequency), arate_<col> for
+    the six continuous numerics at integer anchors (both as
+    :func:`anchor_full_transform`), plus arate10_<col> for velocity/risk
+    at their native 0.1 grid (levels hold ~740 rows each, so k =
+    ``ANCHOR_RATE_SHRINKAGE`` barely shrinks them) and arate_<col> for
+    customer_age / cvv_retry_count / txn_count_last_24h per value. All
+    rates fold-safe; test rows use the full-train payload.
+    """
+    shrink = ANCHOR_RATE_SHRINKAGE
+    sources = _v2_rate_sources()
+    anchors = {
+        column: np.floor(frame[column].to_numpy(dtype=np.float64)).astype(np.int64)
+        for column in GRID_NUMERIC_COLUMNS
+    }
+    target = frame[TARGET_COLUMN].to_numpy(dtype=bool)
+    freq_rows: list[dict[str, object]] = []
+    for column, anchor in anchors.items():
+        counts = pd.Series(anchor).value_counts()
+        for anchor_value, n in counts.items():
+            freq_rows.append(
+                {"column": column, "anchor": int(anchor_value), "n_rows": int(n)}
+            )
+    out = _apply_anchor_freq(frame, anchors, pd.DataFrame(freq_rows))
+
+    fold_of = _fold_of_row(frame, folds)
+    global_rate = float(target.mean())
+    pieces: list[pd.DataFrame] = []
+    for fold_id in range(folds.n_splits):
+        sel = fold_of == fold_id
+        train_part = frame.loc[~sel]
+        table = _v2_rate_table(
+            train_part,
+            sources,
+            train_part[TARGET_COLUMN].to_numpy(dtype=bool),
+            shrink=shrink,
+        )
+        keys_by_output = {
+            out_column: _rate_keys(frame.loc[sel][source_column], mode)
+            for out_column, source_column, mode in sources
+        }
+        pieces.append(
+            _apply_v2_rates(
+                frame.loc[sel], keys_by_output, table, fallback_rate=global_rate
+            )
+        )
+    features = pd.concat(pieces)
+    if len(features) != len(frame) or features.index.duplicated().any():
+        raise ValueError("anchor v2 features lost or duplicated rows")
+    for column in features.columns:
+        out.loc[features.index, column] = features[column]
+        if out[column].isna().any():
+            raise ValueError(f"anchor v2 feature {column!r} has NaNs")
+    full_table = _v2_rate_table(frame, sources, target, shrink=shrink)
+    extras = {
+        ANCHOR_FREQ_FILENAME: pd.DataFrame(freq_rows),
+        ANCHOR_V2_RATES_FILENAME: full_table,
+    }
+    return out, extras
+
+
+def _interaction_rate_table(
+    frame: pd.DataFrame,
+    target: np.ndarray,
+    *,
+    shrink: int,
+) -> pd.DataFrame:
+    """Shrunk fraud rates of (native 0.1 value x alarm) for velocity/risk."""
+    global_rate = float(target.mean())
+    alarm = alarm_flag_mask(frame, columns=ALARM_FLAG_COLUMNS).to_numpy(dtype=bool)
+    rows: list[dict[str, object]] = []
+    for column in NATIVE_RATE_COLUMNS:
+        tenths = np.rint(frame[column].to_numpy(dtype=np.float64) * 10.0)
+        keys = (tenths * 2 + alarm.astype(np.int64)).astype(np.int64)
+        stats = pd.DataFrame({"key": keys, "y": target})
+        agg = stats.groupby("key")["y"].agg(["sum", "size"])
+        for key_value, row in agg.iterrows():
+            rows.append(
+                {
+                    "output": ARATE10A_PREFIX + column,
+                    "key": int(key_value),
+                    "fraud_rate": (float(row["sum"]) + shrink * global_rate)
+                    / (float(row["size"]) + shrink),
+                    "n_rows": int(row["size"]),
+                    "n_fraud": int(row["sum"]),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _apply_interaction_rates(
+    target_frame: pd.DataFrame,
+    keys_by_output: dict[str, np.ndarray],
+    table: pd.DataFrame,
+    *,
+    fallback_rate: float,
+) -> pd.DataFrame:
+    out = target_frame.copy()
+    for out_column, keys in keys_by_output.items():
+        sub = table[table["output"] == out_column]
+        rate_map = dict(zip(sub["key"], sub["fraud_rate"]))
+        out[out_column] = (
+            pd.Series(keys)
+            .map(rate_map)
+            .fillna(fallback_rate)
+            .to_numpy(dtype=np.float64)
+        )
+    return out
+
+
+def _interaction_keys(frame: pd.DataFrame) -> dict[str, np.ndarray]:
+    alarm = alarm_flag_mask(frame, columns=ALARM_FLAG_COLUMNS).to_numpy(dtype=bool)
+    keys: dict[str, np.ndarray] = {}
+    for column in NATIVE_RATE_COLUMNS:
+        tenths = np.rint(frame[column].to_numpy(dtype=np.float64) * 10.0)
+        keys[ARATE10A_PREFIX + column] = (
+            tenths * 2 + alarm.astype(np.int64)
+        ).astype(np.int64)
+    return keys
+
+
+def attach_is_alarm(frame: pd.DataFrame) -> pd.DataFrame:
+    """Return ``frame`` with ``is_alarm``, the OR of the five alarm flags.
+
+    The bit is a function of columns already on the row, so every fold and
+    the test rows see the same value the alarm-profile CV stratifies on.
+    """
+    if IS_ALARM_COLUMN in frame.columns:
+        raise ValueError(f"{IS_ALARM_COLUMN} is already present")
+    out = frame.copy()
+    out[IS_ALARM_COLUMN] = alarm_flag_mask(
+        frame, columns=ALARM_FLAG_COLUMNS
+    ).to_numpy(dtype=bool)
+    return out
+
+
+def anchor_v2_is_alarm_transform(
+    frame: pd.DataFrame, folds: FlagStratifiedCv
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """anchor_v2 plus the explicit alarm-region bit.
+
+    The five alarm flags stay. ``is_alarm`` gives the tree the collapsed
+    region in one column.
+    """
+    out, extras = anchor_v2_transform(frame, folds)
+    return attach_is_alarm(out), extras
+
+
+def attach_n_alarm_flags(frame: pd.DataFrame) -> pd.DataFrame:
+    """Return ``frame`` with ``n_alarm_flags``, how many alarm flags are on.
+
+    The count keeps the dose that ``is_alarm`` collapses. It is a function
+    of columns already on the row, so every fold and the test rows agree.
+    """
+    if N_ALARM_FLAGS_COLUMN in frame.columns:
+        raise ValueError(f"{N_ALARM_FLAGS_COLUMN} is already present")
+    n_flags = len(ALARM_FLAG_COLUMNS)
+    bits: list[np.ndarray | None] = [None] * n_flags
+    for index, name in enumerate(ALARM_FLAG_COLUMNS):
+        bits[index] = as_boolean_array(frame[name], column=name)
+    filled = [bit for bit in bits if bit is not None]
+    if len(filled) != n_flags:
+        raise ValueError("failed to read every alarm flag column")
+    out = frame.copy()
+    out[N_ALARM_FLAGS_COLUMN] = np.stack(filled, axis=1).sum(axis=1).astype(np.int64)
+    return out
+
+
+def anchor_v2_n_alarm_transform(
+    frame: pd.DataFrame, folds: FlagStratifiedCv
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """anchor_v2 plus the count of alarm flags.
+
+    The five flags stay. ``n_alarm_flags`` is their sum, an ordered dose
+    from 0 through 5.
+    """
+    out, extras = anchor_v2_transform(frame, folds)
+    return attach_n_alarm_flags(out), extras
+
+
+def anchor_v3_transform(
+    frame: pd.DataFrame, folds: FlagStratifiedCv
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """anchor_v2 plus fold-safe (native value x alarm) rates.
+
+    The alarm flag splits the value space into two fraud-rate regimes;
+    rates per (0.1-grid value, alarm) group capture that interaction
+    directly. Groups hold ~400 rows on average, so k = 20 shrinkage stays
+    light. Same fold-safe pattern as anchor_v2; test rows use the
+    full-train payload.
+    """
+    shrink = ANCHOR_RATE_SHRINKAGE
+    out, extras = anchor_v2_transform(frame, folds)
+    target = frame[TARGET_COLUMN].to_numpy(dtype=bool)
+    fold_of = _fold_of_row(frame, folds)
+    global_rate = float(target.mean())
+    pieces: list[pd.DataFrame] = []
+    for fold_id in range(folds.n_splits):
+        sel = fold_of == fold_id
+        train_part = frame.loc[~sel]
+        table = _interaction_rate_table(
+            train_part,
+            train_part[TARGET_COLUMN].to_numpy(dtype=bool),
+            shrink=shrink,
+        )
+        keys = {
+            out_column: keys_full[sel]
+            for out_column, keys_full in _interaction_keys(frame).items()
+        }
+        pieces.append(
+            _apply_interaction_rates(
+                frame.loc[sel], keys, table, fallback_rate=global_rate
+            )
+        )
+    features = pd.concat(pieces)
+    if len(features) != len(frame) or features.index.duplicated().any():
+        raise ValueError("anchor v3 features lost or duplicated rows")
+    for column in features.columns:
+        out.loc[features.index, column] = features[column]
+        if out[column].isna().any():
+            raise ValueError(f"anchor v3 feature {column!r} has NaNs")
+    extras[ANCHOR_V3_RATES_FILENAME] = _interaction_rate_table(
+        frame, target, shrink=shrink
+    )
+    return out, extras
+
+
+def apply_anchor_v3_rates_to_test(
+    test_frame: pd.DataFrame, rates_path: Path
+) -> pd.DataFrame:
+    """Test-side interaction rates using the full-train table."""
+    table = pd.read_parquet(rates_path)
+    keys = _interaction_keys(test_frame)
+    fallback = float(table["fraud_rate"].dropna().mean())
+    return _apply_interaction_rates(
+        test_frame, keys, table, fallback_rate=fallback
+    )
+
+
+def _tilt_table(frame: pd.DataFrame) -> pd.DataFrame:
+    """Common slot lift per tilt column, from ``frame``'s block rows.
+
+    For each column, the lift of slot s is observed frauds at s divided
+    by the frauds expected at s if slots were indifferent within each
+    anchor (expected = slot rows x anchor rate, summed over the block's
+    anchors). Anchors above the column's block bound do not enter the
+    estimate.
+    """
+    target = frame[TARGET_COLUMN].to_numpy(dtype=bool)
+    rows: list[dict[str, object]] = []
+    for column, bound in TILT_COLUMNS.items():
+        x = frame[column].to_numpy(dtype=np.float64)
+        anchor = np.floor(x)
+        slot = np.rint((x - anchor) * 10.0).astype(np.int64)
+        block = anchor <= bound
+        stats = pd.DataFrame(
+            {"anchor": anchor[block].astype(np.int64), "slot": slot[block], "y": target[block]}
+        )
+        rate_a = stats.groupby("anchor")["y"].mean()
+        grouped = stats.groupby(["anchor", "slot"])["y"].agg(fraud="sum", rows="size")
+        obs = grouped.reset_index().groupby("slot")["fraud"].sum()
+        cell_rows = grouped.reset_index().groupby("slot")["rows"].sum()
+        exp = (
+            grouped["rows"]
+            .mul(grouped.index.get_level_values("anchor").map(rate_a))
+            .groupby(grouped.index.get_level_values("slot"))
+            .sum()
+        )
+        for slot_value in range(10):
+            observed = float(obs.get(slot_value, 0.0))
+            expected = float(exp.get(slot_value, 0.0))
+            tilt = observed / expected if expected > 0 else 1.0
+            rows.append(
+                {
+                    "column": column,
+                    "slot": slot_value,
+                    "tilt": tilt,
+                    "obs_frauds": observed,
+                    "exp_frauds": expected,
+                    "n_rows": int(cell_rows.get(slot_value, 0)),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _apply_tilt(
+    target_frame: pd.DataFrame,
+    slot_by_column: dict[str, tuple[np.ndarray, np.ndarray]],
+    table: pd.DataFrame,
+) -> pd.DataFrame:
+    """Add atilt_<col> = the row's slot tilt inside the block, 1.0 outside."""
+    out = target_frame.copy()
+    for column, (anchor, slot) in slot_by_column.items():
+        sub = table[table["column"] == column]
+        tilt_map = dict(zip(sub["slot"], sub["tilt"]))
+        tilts = (
+            pd.Series(slot).map(tilt_map).fillna(1.0).to_numpy(dtype=np.float64)
+        )
+        bound = TILT_COLUMNS[column]
+        out[anchor_tilt_column(column)] = np.where(
+            anchor <= bound, tilts, 1.0
+        )
+    return out
+
+
+def anchor_v2t_transform(
+    frame: pd.DataFrame, folds: FlagStratifiedCv
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """anchor_v2 plus the fold-safe common decimal tilt for velocity/risk.
+
+    The tilt analysis found one shared within-anchor slot lift per column
+    (risk: permutation p = 0.010; velocity: p = 0.075) that replicates
+    across folds and explains every low-block anchor. Each row's feature
+    is its slot's lift, estimated on the row's fold-training part inside
+    the column's low block only (velocity <= 40, risk <= 55); rows above
+    the block bound carry the neutral 1.0. Test rows read the full-train
+    tilt table from the payload.
+    """
+    out, extras = anchor_v2_transform(frame, folds)
+    fold_of = _fold_of_row(frame, folds)
+    slot_by_column = {
+        column: (
+            np.floor(frame[column].to_numpy(dtype=np.float64)).astype(np.int64),
+            np.rint(
+                (frame[column].to_numpy(dtype=np.float64)
+                 - np.floor(frame[column].to_numpy(dtype=np.float64)))
+                * 10.0
+            ).astype(np.int64),
+        )
+        for column in TILT_COLUMNS
+    }
+    pieces: list[pd.DataFrame] = []
+    for fold_id in range(folds.n_splits):
+        sel = fold_of == fold_id
+        table = _tilt_table(frame.loc[~sel])
+        pieces.append(
+            _apply_tilt(
+                frame.loc[sel],
+                {c: (a[sel], s[sel]) for c, (a, s) in slot_by_column.items()},
+                table,
+            )
+        )
+    features = pd.concat(pieces)
+    if len(features) != len(frame) or features.index.duplicated().any():
+        raise ValueError("anchor tilt features lost or duplicated rows")
+    for column in features.columns:
+        out.loc[features.index, column] = features[column]
+        if out[column].isna().any():
+            raise ValueError(f"anchor tilt feature {column!r} has NaNs")
+    extras[ANCHOR_TILT_FILENAME] = _tilt_table(frame)
+    return out, extras
+
+
+def apply_anchor_tilt_to_test(
+    test_frame: pd.DataFrame, tilt_path: Path
+) -> pd.DataFrame:
+    """Test-side common tilt using the version's full-train table."""
+    table = pd.read_parquet(tilt_path)
+    slot_by_column = {
+        column: (
+            np.floor(test_frame[column].to_numpy(dtype=np.float64)).astype(np.int64),
+            np.rint(
+                (test_frame[column].to_numpy(dtype=np.float64)
+                 - np.floor(test_frame[column].to_numpy(dtype=np.float64)))
+                * 10.0
+            ).astype(np.int64),
+        )
+        for column in TILT_COLUMNS
+    }
+    return _apply_tilt(test_frame, slot_by_column, table)
+
+
+def _combined_marginal_table(frame: pd.DataFrame) -> pd.DataFrame:
+    """Per-column shrunk integer-anchor rates of the two score columns.
+
+    One ``anchor = -1`` row per column carries the global rate — the
+    neutral marginal for unseen anchors.
+    """
+    shrink = COMBINED_RATE_SHRINKAGE
+    target = frame[TARGET_COLUMN].to_numpy(dtype=bool)
+    global_rate = float(target.mean())
+    rows: list[dict[str, object]] = []
+    for column in COMBINED_RATE_COLUMNS:
+        rows.append(
+            {"column": column, "anchor": -1, "fraud_rate": global_rate, "n_rows": len(frame)}
+        )
+        anchor = np.floor(frame[column].to_numpy(dtype=np.float64)).astype(np.int64)
+        stats = pd.DataFrame({"anchor": anchor, "y": target})
+        agg = stats.groupby("anchor")["y"].agg(["sum", "size"])
+        for anchor_value, row in agg.iterrows():
+            rows.append(
+                {
+                    "column": column,
+                    "anchor": int(anchor_value),
+                    "fraud_rate": (float(row["sum"]) + shrink * global_rate)
+                    / (float(row["size"]) + shrink),
+                    "n_rows": int(row["size"]),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _apply_combined_rate(
+    target_frame: pd.DataFrame,
+    anchors: dict[str, np.ndarray],
+    table: pd.DataFrame,
+) -> pd.DataFrame:
+    """Add acomb = sigmoid(logit(p_va) + logit(p_ra) - logit(global))."""
+    first, second = COMBINED_RATE_COLUMNS
+    maps = {}
+    global_rate = None
+    for column in (first, second):
+        sub = table[table["column"] == column]
+        maps[column] = dict(zip(sub["anchor"], sub["fraud_rate"]))
+        neutral = float(sub.loc[sub["anchor"] == -1, "fraud_rate"].iloc[0])
+        if global_rate is None:
+            global_rate = neutral
+        elif abs(neutral - global_rate) > 1e-12:
+            raise ValueError("marginal tables disagree on the global rate")
+    p_first = (
+        pd.Series(anchors[first]).map(maps[first]).fillna(global_rate)
+        .to_numpy(dtype=np.float64)
+    )
+    p_second = (
+        pd.Series(anchors[second]).map(maps[second]).fillna(global_rate)
+        .to_numpy(dtype=np.float64)
+    )
+    p_first = np.clip(p_first, 1e-9, 1 - 1e-9)
+    p_second = np.clip(p_second, 1e-9, 1 - 1e-9)
+    logit_g = np.log(global_rate / (1.0 - global_rate))
+    combined = 1.0 / (
+        1.0 + np.exp(-(np.log(p_first / (1 - p_first)) + np.log(p_second / (1 - p_second)) - logit_g))
+    )
+    out = target_frame.copy()
+    out[ANCHOR_COMBINED_COLUMN] = combined
+    return out
+
+
+def anchor_v2c_transform(
+    frame: pd.DataFrame, folds: FlagStratifiedCv
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """anchor_v2 plus the combined fraud rate of the two score anchors.
+
+    The joint-anchor analysis found the (velocity anchor x risk anchor)
+    cell field is the product of the two marginal anchor rates (lift flat
+    in dense cells; independence simulation p = 0.796). This feature makes
+    that product explicit per row: the two shrunk integer-anchor rates
+    combined on the log-odds scale, computed fold-safely on the row's
+    fold-training part; unseen anchors fall back to the training part's
+    global rate. Test rows use the full-train marginal payload.
+    """
+    out, extras = anchor_v2_transform(frame, folds)
+    fold_of = _fold_of_row(frame, folds)
+    anchors = {
+        column: np.floor(frame[column].to_numpy(dtype=np.float64)).astype(np.int64)
+        for column in COMBINED_RATE_COLUMNS
+    }
+    pieces: list[pd.DataFrame] = []
+    for fold_id in range(folds.n_splits):
+        sel = fold_of == fold_id
+        train_part = frame.loc[~sel]
+        table = _combined_marginal_table(train_part)
+        pieces.append(
+            _apply_combined_rate(
+                frame.loc[sel],
+                {c: a[sel] for c, a in anchors.items()},
+                table,
+            )
+        )
+    features = pd.concat(pieces)
+    if len(features) != len(frame) or features.index.duplicated().any():
+        raise ValueError("combined rate features lost or duplicated rows")
+    out.loc[features.index, ANCHOR_COMBINED_COLUMN] = features[ANCHOR_COMBINED_COLUMN]
+    if out[ANCHOR_COMBINED_COLUMN].isna().any():
+        raise ValueError("combined rate feature has NaNs")
+    extras[ANCHOR_COMBINED_FILENAME] = _combined_marginal_table(frame)
+    return out, extras
+
+
+def apply_anchor_combined_to_test(
+    test_frame: pd.DataFrame, rates_path: Path
+) -> pd.DataFrame:
+    """Test-side combined rate using the full-train marginal payload."""
+    table = pd.read_parquet(rates_path)
+    anchors = {
+        column: np.floor(test_frame[column].to_numpy(dtype=np.float64)).astype(np.int64)
+        for column in COMBINED_RATE_COLUMNS
+    }
+    return _apply_combined_rate(test_frame, anchors, table)
+
+
+def apply_anchor_v2_rates_to_test(
+    test_frame: pd.DataFrame, rates_path: Path
+) -> pd.DataFrame:
+    """Test-side v2 rates using the version's full-train table."""
+    table = pd.read_parquet(rates_path)
+    sources = _v2_rate_sources()
+    keys_by_output = {
+        out_column: _rate_keys(test_frame[source_column], mode)
+        for out_column, source_column, mode in sources
+    }
+    fallback = float(table["fraud_rate"].dropna().mean())
+    return _apply_v2_rates(
+        test_frame, keys_by_output, table, fallback_rate=fallback
+    )
+
+
 TRANSFORMS: dict[str, TransformFn] = {
     RISK_CONTEXT_TRANSFORM: risk_context_transform,
     RISK_AGGREGATES_TRANSFORM: risk_aggregates_transform,
     PROFILE_CONTEXT_TRANSFORM: profile_context_transform,
+    GRID_SLOTS_TRANSFORM: grid_slots_transform,
+    GRID_SLOTS_EXACT_TRANSFORM: grid_slots_exact_transform,
+    SLOT_Z_TRANSFORM: slot_z_transform,
+    SLOT_REFS_TRANSFORM: slot_refs_transform,
+    ANCHOR_FREQ_TRANSFORM: anchor_freq_transform,
+    ANCHOR_FULL_TRANSFORM: anchor_full_transform,
+    ANCHOR_V2_TRANSFORM: anchor_v2_transform,
+    ANCHOR_V2_IS_ALARM_TRANSFORM: anchor_v2_is_alarm_transform,
+    ANCHOR_V2_N_ALARM_TRANSFORM: anchor_v2_n_alarm_transform,
+    ANCHOR_V2C_TRANSFORM: anchor_v2c_transform,
+    ANCHOR_V2T_TRANSFORM: anchor_v2t_transform,
+    ANCHOR_V3_TRANSFORM: anchor_v3_transform,
 }
 
 

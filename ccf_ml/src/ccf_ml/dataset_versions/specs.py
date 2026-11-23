@@ -6,13 +6,25 @@ from typing import NamedTuple
 
 from ccf_ml.cross_validation.constants import ID_COLUMN, TARGET_COLUMN
 from ccf_ml.dataset_versions.constants import (
+    ANCHOR_FREQ_TRANSFORM,
+    ANCHOR_FULL_TRANSFORM,
+    ANCHOR_V2_IS_ALARM_TRANSFORM,
+    ANCHOR_V2_N_ALARM_TRANSFORM,
+    ANCHOR_V2_TRANSFORM,
+    ANCHOR_V2C_TRANSFORM,
+    ANCHOR_V2T_TRANSFORM,
+    ANCHOR_V3_TRANSFORM,
     CARD_TYPE_COLUMN,
     CHANNEL_COLUMN,
     DEVICE_TYPE_COLUMN,
+    GRID_SLOTS_EXACT_TRANSFORM,
+    GRID_SLOTS_TRANSFORM,
     IS_NEW_MERCHANT_COLUMN,
     RISK_AGGREGATES_TRANSFORM,
     PROFILE_CONTEXT_TRANSFORM,
     RISK_CONTEXT_TRANSFORM,
+    SLOT_REFS_TRANSFORM,
+    SLOT_Z_TRANSFORM,
     TIME_COLUMNS,
 )
 
@@ -205,5 +217,177 @@ DATASET_VERSION_SPECS: tuple[DatasetVersionSpec, ...] = (
         ),
         drop_columns=TIME_COLUMNS + (CHANNEL_COLUMN, CARD_TYPE_COLUMN),
         transform=PROFILE_CONTEXT_TRANSFORM,
+    ),
+    DatasetVersionSpec(
+        name="grid_slots",
+        description=(
+            "Probe: explicit grid decomposition of the six continuous "
+            "numerics. Each gains grid_anchor_<col> = floor(x) and "
+            "grid_slot_<col> = cents above the anchor (0..99), both "
+            "categorical. Grounded in the 2026-11-20 verification battery: "
+            "values sit on exact 2-decimal grids, slot distributions are "
+            "lumpy and anchor-dependent, and slots carry conditional fraud "
+            "signal (within-anchor AUC up to 0.74 on merchant_risk). Tests "
+            "whether tuned XGB depth-6 trees already carve anchor x slot "
+            "cells from the raw floats. Drops only the established free "
+            "ones (time, channel, card_type)."
+        ),
+        drop_columns=TIME_COLUMNS + (CHANNEL_COLUMN, CARD_TYPE_COLUMN),
+        transform=GRID_SLOTS_TRANSFORM,
+    ),
+    DatasetVersionSpec(
+        name="grid_slots_exact",
+        description=(
+            "Probe: grid_slots plus exact-grid-value ids for the two "
+            "0.1-grid columns (grid_value_velocity_score, "
+            "grid_value_merchant_risk_score = x*10 as integer; 674 / 959 "
+            "levels). These have no cent-level structure, so their full "
+            "value is a small id space the trees can memorize directly."
+        ),
+        drop_columns=TIME_COLUMNS + (CHANNEL_COLUMN, CARD_TYPE_COLUMN),
+        transform=GRID_SLOTS_EXACT_TRANSFORM,
+    ),
+    DatasetVersionSpec(
+        name="slot_z",
+        description=(
+            "Slot-reference probe v1 (target-free): slotz_<col> = "
+            "(slot - mean(slot|anchor)) / std(slot|anchor) for the six "
+            "continuous numerics; anchors under 10 rows and unseen anchors "
+            "fall back to the column's global slot mean/std. Numeric "
+            "re-expression of the verified within-anchor decimal structure "
+            "after the grid-ID encoding poisoned trees (-0.022). Drops only "
+            "the established free ones (time, channel, card_type)."
+        ),
+        drop_columns=TIME_COLUMNS + (CHANNEL_COLUMN, CARD_TYPE_COLUMN),
+        transform=SLOT_Z_TRANSFORM,
+    ),
+    DatasetVersionSpec(
+        name="slot_refs",
+        description=(
+            "Slot-reference probe v2 (target-aware, fold-safe): "
+            "slotlda_<col> = |slot - clean_centroid(anchor)| - "
+            "|slot - fraud_centroid(anchor)| with centroids from the row's "
+            "fold-training part, shrunk k=50 toward global class centroids; "
+            "test rows use full-train centroids. Encodes the battery's "
+            "strongest finding (fraud-vs-clean slot shifts within anchors, "
+            "|z| up to 10) as one numeric threshold. Drops only the "
+            "established free ones (time, channel, card_type)."
+        ),
+        drop_columns=TIME_COLUMNS + (CHANNEL_COLUMN, CARD_TYPE_COLUMN),
+        transform=SLOT_REFS_TRANSFORM,
+    ),
+    DatasetVersionSpec(
+        name="anchor_freq",
+        description=(
+            "Rarity probe (target-free): afreq_<col> = log1p(train count "
+            "of the row's floor anchor) for the six continuous numerics. "
+            "Rarity is non-monotone in value, so numeric thresholds cannot "
+            "recover it from the raw column. Screened marginal fraud AUC: "
+            "0.63 (velocity), 0.63 (risk), 0.56 (hours), 0.55 (amount). "
+            "Unseen test anchors score log1p(0). Drops only the "
+            "established free ones (time, channel, card_type)."
+        ),
+        drop_columns=TIME_COLUMNS + (CHANNEL_COLUMN, CARD_TYPE_COLUMN),
+        transform=ANCHOR_FREQ_TRANSFORM,
+    ),
+    DatasetVersionSpec(
+        name="anchor_full",
+        description=(
+            "Rarity probe stacked with target-aware anchor risk: afreq_<col> "
+            "(log train frequency of the floor anchor, as anchor_freq) plus "
+            "arate_<col> = (frauds + 20*global_rate) / (rows + 20) of the "
+            "anchor, fold-safe (fold-train only; test uses full-train "
+            "payload). Leaky full-train screen of anchor rate: 0.67 "
+            "(balance), 0.61 (amount). Drops only the established free "
+            "ones (time, channel, card_type)."
+        ),
+        drop_columns=TIME_COLUMNS + (CHANNEL_COLUMN, CARD_TYPE_COLUMN),
+        transform=ANCHOR_FULL_TRANSFORM,
+    ),
+    DatasetVersionSpec(
+        name="anchor_v2",
+        description=(
+            "Rate family v2: anchor_full (afreq + integer-anchor rates) "
+            "plus arate10_<col> at the native 0.1 grid of velocity/risk "
+            "(leaky screen 0.72 / 0.76; ~740 rows per level so shrinkage "
+            "is light) and arate per value for customer_age, "
+            "cvv_retry_count, txn_count_last_24h. All rates fold-safe "
+            "(k=20), test rows use the full-train payload. Drops only the "
+            "established free ones (time, channel, card_type)."
+        ),
+        drop_columns=TIME_COLUMNS + (CHANNEL_COLUMN, CARD_TYPE_COLUMN),
+        transform=ANCHOR_V2_TRANSFORM,
+    ),
+    DatasetVersionSpec(
+        name="anchor_v2_is_alarm",
+        description=(
+            "anchor_v2 plus is_alarm, the OR of the five alarm flags. The "
+            "five flags stay in the matrix. The collapsed bit is the "
+            "alarm-region indicator the unified CV already stratifies on, "
+            "offered to the tree as one column. Same drops as anchor_v2 "
+            "(time, channel, card_type)."
+        ),
+        drop_columns=TIME_COLUMNS + (CHANNEL_COLUMN, CARD_TYPE_COLUMN),
+        transform=ANCHOR_V2_IS_ALARM_TRANSFORM,
+    ),
+    DatasetVersionSpec(
+        name="anchor_v2_n_alarm",
+        description=(
+            "anchor_v2 plus n_alarm_flags, the count of the five alarm "
+            "flags (0 through 5). The five flags stay. The count keeps the "
+            "dose that is_alarm collapses: fraud rate rises from 0.011 at "
+            "0 flags to 0.069, 0.26, and 0.65 at 1, 2, and 3. Same drops "
+            "as anchor_v2 (time, channel, card_type)."
+        ),
+        drop_columns=TIME_COLUMNS + (CHANNEL_COLUMN, CARD_TYPE_COLUMN),
+        transform=ANCHOR_V2_N_ALARM_TRANSFORM,
+    ),
+    DatasetVersionSpec(
+        name="anchor_v2t",
+        description=(
+            "Rate family v2 + common decimal tilt: anchor_v2 plus "
+            "atilt_<col> for velocity/risk — the row's slot lift under one "
+            "shared within-anchor tilt g(slot), estimated fold-safely on the "
+            "column's low block (velocity <= 40, risk <= 55) where the tilt "
+            "was validated (q3_decimal_signal / slot_tilt_stability "
+            "notebooks, 2026-11-22: risk permutation p = 0.010, velocity "
+            "p = 0.075; fold-replicating; one tilt explains every anchor). "
+            "Rows above the block bound carry the neutral 1.0. Ten levels "
+            "per column, ~100k fold-train rows each, no shrinkage. Drops "
+            "only the established free ones (time, channel, card_type)."
+        ),
+        drop_columns=TIME_COLUMNS + (CHANNEL_COLUMN, CARD_TYPE_COLUMN),
+        transform=ANCHOR_V2T_TRANSFORM,
+    ),
+    DatasetVersionSpec(
+        name="anchor_v2c",
+        description=(
+            "Rate family v2 + combined anchor rate: anchor_v2 plus "
+            "acomb_velocity_risk = sigmoid(logit(p_va) + logit(p_ra) - "
+            "logit(global)) — the product of the two score columns' marginal "
+            "anchor-rate stories made explicit per row. Grounded in the "
+            "joint-anchor analysis (q1_joint_anchor_structure.ipynb, "
+            "2026-11-22): within-anchor variance is explained by the partner "
+            "anchor (4.3-4.5x binomial) but the joint field equals the "
+            "marginals' product (independence simulation p = 0.796, lift flat "
+            "in dense cells). Marginals are shrunk (k=20) integer-anchor "
+            "rates, fold-safe; unseen anchors fall back to the global rate "
+            "(anchor -1 rows in the payload). Drops only the established "
+            "free ones (time, channel, card_type)."
+        ),
+        drop_columns=TIME_COLUMNS + (CHANNEL_COLUMN, CARD_TYPE_COLUMN),
+        transform=ANCHOR_V2C_TRANSFORM,
+    ),
+    DatasetVersionSpec(
+        name="anchor_v3",
+        description=(
+            "Rate family v3: anchor_v2 plus arate10a_<col> = fold-safe "
+            "shrunk fraud rate of (native 0.1 value x alarm flag) for "
+            "velocity/risk (leaky screen 0.81 / 0.83; ~400 rows per "
+            "group, k=20). Drops only the established free ones (time, "
+            "channel, card_type)."
+        ),
+        drop_columns=TIME_COLUMNS + (CHANNEL_COLUMN, CARD_TYPE_COLUMN),
+        transform=ANCHOR_V3_TRANSFORM,
     ),
 )

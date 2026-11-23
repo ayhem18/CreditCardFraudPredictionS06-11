@@ -132,7 +132,7 @@ def main() -> None:
     print("\nper-fold pooled AUC (rows = fold ids)")
     print(fold_wide.to_string())
 
-    table_dir = get_script_table_dir(Path(__file__).name)
+    table_dir = get_script_table_dir(Path(__file__).name, group="baselines")
     summary_path = table_dir / SUMMARY_FILENAME
     summary.to_csv(summary_path, index=False)
     fold_path = table_dir / FOLD_AUC_FILENAME

@@ -30,6 +30,7 @@ from ccf_ml.file_utils import (
     get_training_config_path,
     get_training_eval_dir,
     get_training_oof_path,
+    get_training_submission_path,
 )
 
 COMPETITION = "playground-series-s6e11"
@@ -80,14 +81,7 @@ def main() -> None:
 
 
 def _submit_exp(exp_name: str) -> None:
-    submission_path = (
-        get_repo_root()
-        / "storage"
-        / "artifacts"
-        / "training"
-        / exp_name
-        / "submission.csv"
-    )
+    submission_path = get_training_submission_path(exp_name)
     if not submission_path.is_file():
         raise FileNotFoundError(f"no submission.csv for {exp_name!r}: {submission_path}")
     message = _build_message(exp_name)

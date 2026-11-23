@@ -33,6 +33,13 @@ from ccf_ml.dataset_versions.constants import (
     RISK_CONTEXT_GROUPS_FILENAME,
     RISK_CONTEXT_TRANSFORM,
     TIME_OF_DAY_HOUR_COLUMN,
+    ANCHOR_COMBINED_COLUMN,
+    ANCHOR_COMBINED_FILENAME,
+    ANCHOR_TILT_FILENAME,
+    ANCHOR_V2C_TRANSFORM,
+    ANCHOR_V2T_TRANSFORM,
+    IS_ALARM_COLUMN,
+    N_ALARM_FLAGS_COLUMN,
 )
 from ccf_ml.dataset_versions.loader import (
     iter_folds,
@@ -44,9 +51,14 @@ from ccf_ml.dataset_versions.manifest import (
     load_dataset_version_manifest,
     parse_dataset_version_manifest,
 )
+from ccf_ml.cross_validation.alarm import alarm_flag_mask
 from ccf_ml.dataset_versions.transforms import (
     _profile_percentile_features,
+    apply_anchor_combined_to_test,
+    apply_anchor_tilt_to_test,
     apply_transform,
+    attach_is_alarm,
+    attach_n_alarm_flags,
 )
 from ccf_ml.dataset_versions.specs import (
     DATASET_VERSION_SPECS,
@@ -595,3 +607,270 @@ class TestProfileContextTransform(unittest.TestCase):
         self.assertIn("prof_pct_amount_usd", version.frame.columns)
         self.assertNotIn(IS_NEW_MERCHANT_COLUMN, version.frame.columns)
         self.assertEqual(len(version.frame), len(self.frame))
+
+
+class TestAnchorV2TTransform(unittest.TestCase):
+    """Common slot tilt on an exact synthetic 2x tilt at slot .5."""
+
+    def setUp(self) -> None:
+        self.frame = _tilt_frame()
+        self.folds = build_flag_stratified_cv(
+            self.frame, n_splits=2, random_state=SEED
+        )
+
+    def test_tilt_values_block_mask_and_fold_safety(self) -> None:
+        out, extras = apply_transform(
+            ANCHOR_V2T_TRANSFORM, self.frame, self.folds
+        )
+        tilt = out["atilt_velocity_score"].to_numpy(dtype=np.float64)
+        velocity = self.frame["velocity_score"].to_numpy(dtype=np.float64)
+        anchor = np.floor(velocity).astype(np.int64)
+        slot = np.rint((velocity - anchor) * 10.0).astype(np.int64)
+        in_block = velocity <= 40.0
+        self.assertTrue((tilt[~in_block] == 1.0).all())
+
+        # full-train payload tilt is exact by construction
+        table = extras[ANCHOR_TILT_FILENAME]
+        sub = table[table["column"] == "velocity_score"]
+        by_slot = dict(zip(sub["slot"], sub["tilt"]))
+        self.assertAlmostEqual(by_slot[0], 0.0, places=12)
+        self.assertAlmostEqual(by_slot[5], 2.0, places=12)
+
+        # fold-safety: each fold's rows carry the tilt recomputed from the
+        # other fold's rows only (independent recomputation of the formula)
+        fold_of = np.full(len(self.frame), -1, dtype=np.int64)
+        for fold in self.folds.folds:
+            for record_id in fold.val_ids:
+                fold_of[self.frame[ID_COLUMN].to_numpy() == record_id] = fold.fold_id
+        for fold_id in range(2):
+            train = pd.DataFrame(
+                {
+                    "anchor": anchor[fold_of != fold_id],
+                    "slot": slot[fold_of != fold_id],
+                    "y": self.frame[TARGET_COLUMN].to_numpy()[
+                        fold_of != fold_id
+                    ].astype(float),
+                }
+            )
+            train = train[train["anchor"] <= 40]
+            rate_a = train.groupby("anchor")["y"].mean()
+            train["exp"] = train["anchor"].map(rate_a)
+            obs = train.groupby("slot")["y"].sum()
+            exp = train.groupby("slot")["exp"].sum()
+            expected = obs / exp
+            sel = (fold_of == fold_id) & in_block
+            for slot_value in (0, 5):
+                rows = sel & (slot == slot_value)
+                self.assertTrue(rows.any())
+                self.assertAlmostEqual(
+                    float(tilt[rows][0]), float(expected.loc[slot_value]),
+                    places=12,
+                )
+                self.assertTrue((tilt[rows] == tilt[rows][0]).all())
+
+        # anchor_v2 columns are all present alongside the tilt
+        for name in ("afreq_velocity_score", "arate_velocity_score",
+                     "arate10_velocity_score"):
+            self.assertIn(name, out.columns)
+        self.assertFalse(out["atilt_merchant_risk_score"].isna().any())
+
+    def test_test_side_mapping_from_payload(self) -> None:
+        _, extras = apply_transform(
+            ANCHOR_V2T_TRANSFORM, self.frame, self.folds
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            tilt_path = Path(tmp) / ANCHOR_TILT_FILENAME
+            extras[ANCHOR_TILT_FILENAME].to_parquet(tilt_path, index=False)
+            test_frame = pd.DataFrame(
+                {
+                    ID_COLUMN: [0, 1, 2],
+                    "velocity_score": [5.0, 5.5, 41.5],
+                    "merchant_risk_score": [30.0, 30.0, 30.0],
+                }
+            )
+            mapped = apply_anchor_tilt_to_test(test_frame, tilt_path)
+            tilt = mapped["atilt_velocity_score"].to_numpy(dtype=np.float64)
+            self.assertEqual(tilt.tolist(), [0.0, 2.0, 1.0])
+
+
+def _tilt_frame() -> pd.DataFrame:
+    """34 rows: anchors 5/6 with 0/8 fraud at slot .0 and 2/8 at slot .5.
+
+    Both anchors carry the same 0.125 rate, so the shared tilt is exact:
+    slot .0 -> 0.0 observed / 2.0 expected, slot .5 -> 4.0 / 2.0 = 2.0.
+    Two rows at velocity 41.0 (above the block bound) must stay neutral.
+    """
+    n_cell = 8
+    velocity = np.concatenate(
+        [
+            np.full(n_cell, 5.0), np.full(n_cell, 5.5),
+            np.full(n_cell, 6.0), np.full(n_cell, 6.5),
+            np.full(2, 41.0),
+        ]
+    )
+    fraud_half = np.array([1, 1, 0, 0, 0, 0, 0, 0], dtype=np.int64)
+    fraud = np.concatenate(
+        [
+            np.zeros(n_cell, dtype=np.int64), fraud_half,
+            np.zeros(n_cell, dtype=np.int64), fraud_half,
+            np.zeros(2, dtype=np.int64),
+        ]
+    )
+    n_rows = len(velocity)
+    frame = pd.DataFrame(
+        {
+            ID_COLUMN: np.arange(n_rows, dtype=np.int64),
+            TARGET_COLUMN: fraud,
+            "velocity_score": velocity,
+            MERCHANT_RISK_SCORE_COLUMN: np.full(n_rows, 30.0),
+            "amount_usd": np.full(n_rows, 10.0),
+            "account_balance_usd": np.full(n_rows, 100.0),
+            "hours_since_last_txn": np.full(n_rows, 1.0),
+            "distance_from_home_km": np.full(n_rows, 2.0),
+            "customer_age": np.full(n_rows, 40.0),
+            "cvv_retry_count": np.zeros(n_rows, dtype=np.int64),
+            "txn_count_last_24h": np.zeros(n_rows, dtype=np.int64),
+        }
+    )
+    alarm = np.zeros(n_rows, dtype=bool)
+    alarm[::2] = True
+    for i, name in enumerate(ALARM_FLAG_COLUMNS):
+        frame[name] = alarm if i == 0 else fraud == 1
+    return frame
+
+
+class TestAnchorV2CTransform(unittest.TestCase):
+    """Combined rate = logit-add of the two marginal anchor rates."""
+
+    def setUp(self) -> None:
+        self.frame = _tilt_frame()
+        self.folds = build_flag_stratified_cv(
+            self.frame, n_splits=2, random_state=SEED
+        )
+
+    def test_combined_value_formula_and_fold_safety(self) -> None:
+        out, extras = apply_transform(
+            ANCHOR_V2C_TRANSFORM, self.frame, self.folds
+        )
+        self.assertIn(ANCHOR_COMBINED_COLUMN, out.columns)
+        combined = out[ANCHOR_COMBINED_COLUMN].to_numpy(dtype=np.float64)
+        self.assertFalse(np.isnan(combined).any())
+
+        # independent recomputation of each fold's expected values
+        fold_of = np.full(len(self.frame), -1, dtype=np.int64)
+        for fold in self.folds.folds:
+            for record_id in fold.val_ids:
+                fold_of[self.frame[ID_COLUMN].to_numpy() == record_id] = fold.fold_id
+        velocity = self.frame["velocity_score"].to_numpy(dtype=np.float64)
+        risk = self.frame[MERCHANT_RISK_SCORE_COLUMN].to_numpy(dtype=np.float64)
+        va = np.floor(velocity).astype(np.int64)
+        ra = np.floor(risk).astype(np.int64)
+        y = self.frame[TARGET_COLUMN].to_numpy(dtype=float)
+        for fold_id in range(2):
+            train = fold_of != fold_id
+            g = float(y[train].mean())
+            rates = {}
+            for anchors_arr, key in ((va, "velocity_score"), (ra, "merchant_risk_score")):
+                stats = pd.DataFrame({"a": anchors_arr[train], "y": y[train]})
+                agg = stats.groupby("a")["y"].agg(["sum", "size"])
+                rates[key] = (agg["sum"] + 20 * g) / (agg["size"] + 20)
+            g = float(y[train].mean())
+            sel = fold_of == fold_id
+            p1 = pd.Series(va[sel]).map(rates["velocity_score"]).fillna(g)
+            p2 = pd.Series(ra[sel]).map(rates["merchant_risk_score"]).fillna(g)
+            logit = lambda p: np.log(p / (1.0 - p))  # noqa: E731
+            expected = 1.0 / (1.0 + np.exp(-(logit(p1) + logit(p2) - logit(g))))
+            np.testing.assert_allclose(
+                combined[sel], expected.to_numpy(), rtol=1e-12
+            )
+
+        # payload carries the neutral anchor -1 rows for both columns
+        table = extras[ANCHOR_COMBINED_FILENAME]
+        for column in ("velocity_score", "merchant_risk_score"):
+            neutral = table[(table["column"] == column) & (table["anchor"] == -1)]
+            self.assertEqual(len(neutral), 1)
+
+    def test_test_side_uses_full_train_marginals(self) -> None:
+        _, extras = apply_transform(
+            ANCHOR_V2C_TRANSFORM, self.frame, self.folds
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ANCHOR_COMBINED_FILENAME
+            extras[ANCHOR_COMBINED_FILENAME].to_parquet(path, index=False)
+            test_frame = pd.DataFrame(
+                {
+                    ID_COLUMN: [0, 1],
+                    "velocity_score": [5.0, 99.0],   # anchor 99 unseen
+                    "merchant_risk_score": [30.0, 30.0],
+                }
+            )
+            mapped = apply_anchor_combined_to_test(test_frame, path)
+            values = mapped[ANCHOR_COMBINED_COLUMN].to_numpy(dtype=np.float64)
+            # unseen anchor 99 falls back to the global-rate marginal, so
+            # the combined value equals anchor 30's own shrunk rate
+            table = extras[ANCHOR_COMBINED_FILENAME]
+            rate_30 = float(
+                table[(table["column"] == "merchant_risk_score") & (table["anchor"] == 30)]
+                ["fraud_rate"].iloc[0]
+            )
+            self.assertAlmostEqual(values[1], rate_30, places=12)
+            self.assertTrue(0.0 < values[0] < 1.0)
+
+
+class TestIsAlarmColumn(unittest.TestCase):
+    """``is_alarm`` is the OR of the five alarm flags."""
+
+    def test_or_matches_the_alarm_mask(self) -> None:
+        n_rows = 4
+        frame = pd.DataFrame({ID_COLUMN: np.arange(n_rows)})
+        patterns = (
+            (False, False, False, False, False),
+            (True, False, False, False, False),
+            (False, False, True, False, True),
+            (True, True, True, True, True),
+        )
+        for flag_index, name in enumerate(ALARM_FLAG_COLUMNS):
+            frame[name] = [patterns[row][flag_index] for row in range(n_rows)]
+        attached = attach_is_alarm(frame)
+        expected = alarm_flag_mask(frame, columns=ALARM_FLAG_COLUMNS).to_numpy()
+        self.assertTrue(
+            np.array_equal(attached[IS_ALARM_COLUMN].to_numpy(), expected)
+        )
+        self.assertEqual(expected.tolist(), [False, True, True, True])
+
+    def test_spec_keeps_the_five_flags(self) -> None:
+        spec = next(
+            item for item in DATASET_VERSION_SPECS if item.name == "anchor_v2_is_alarm"
+        )
+        self.assertEqual(spec.transform, "anchor_v2_is_alarm")
+        for name in ALARM_FLAG_COLUMNS:
+            self.assertNotIn(name, spec.drop_columns)
+
+
+class TestNAlarmFlagsColumn(unittest.TestCase):
+    """``n_alarm_flags`` counts the five alarm flags."""
+
+    def test_count_matches_the_flags(self) -> None:
+        n_rows = 4
+        frame = pd.DataFrame({ID_COLUMN: np.arange(n_rows)})
+        patterns = (
+            (False, False, False, False, False),
+            (True, False, False, False, False),
+            (False, False, True, False, True),
+            (True, True, True, True, True),
+        )
+        for flag_index, name in enumerate(ALARM_FLAG_COLUMNS):
+            frame[name] = [patterns[row][flag_index] for row in range(n_rows)]
+        attached = attach_n_alarm_flags(frame)
+        self.assertEqual(
+            attached[N_ALARM_FLAGS_COLUMN].tolist(),
+            [0, 1, 2, 5],
+        )
+
+    def test_spec_keeps_the_five_flags(self) -> None:
+        spec = next(
+            item for item in DATASET_VERSION_SPECS if item.name == "anchor_v2_n_alarm"
+        )
+        self.assertEqual(spec.transform, "anchor_v2_n_alarm")
+        for name in ALARM_FLAG_COLUMNS:
+            self.assertNotIn(name, spec.drop_columns)

@@ -150,21 +150,40 @@ def _section_stem(section: str) -> str:
     return stem
 
 
-def get_script_plot_dir(script_name: str | Path, *, section: str) -> Path:
-    """Return ``<storage>/artifacts/<script_stem>/plots/<section>`` (created on demand)."""
+def get_script_plot_dir(
+    script_name: str | Path, *, section: str, group: str | None = None
+) -> Path:
+    """Return the plot dir for one script (created on demand).
+
+    Without ``group``: ``<storage>/artifacts/<script_stem>/plots/<section>``.
+    With ``group`` (the experiments folder the script lives in):
+    ``<storage>/artifacts/<group>/<script_stem>/plots/<section>`` — one
+    folder per notebook inside one folder per experiment group, instead of
+    a flat artifacts root.
+    """
+    base = get_artifacts_dir()
+    if group is not None:
+        base = base / _section_stem(group)
     return _ensure_dir(
-        get_artifacts_dir()
+        base
         / _script_stem(script_name)
         / _PLOTS_DIRNAME
         / _section_stem(section)
     )
 
 
-def get_script_table_dir(script_name: str | Path) -> Path:
-    """Return ``<storage>/artifacts/<script_stem>/tables`` (created on demand)."""
-    return _ensure_dir(
-        get_artifacts_dir() / _script_stem(script_name) / _TABLES_DIRNAME
-    )
+def get_script_table_dir(
+    script_name: str | Path, *, group: str | None = None
+) -> Path:
+    """Return the table dir for one script (created on demand).
+
+    ``group`` nests the script under its experiments folder, mirroring
+    :func:`get_script_plot_dir`.
+    """
+    base = get_artifacts_dir()
+    if group is not None:
+        base = base / _section_stem(group)
+    return _ensure_dir(base / _script_stem(script_name) / _TABLES_DIRNAME)
 
 
 def get_package_dir() -> Path:
@@ -236,10 +255,47 @@ def get_training_artifacts_dir() -> Path:
     return _ensure_dir(get_artifacts_dir() / _TRAINING_DIRNAME)
 
 
+# Training experiments are grouped into subfolders by experiment family so
+# the folder stays scannable: <training>/<group>/<exp_name>. Families are
+# matched by exp-name prefix, longest first; a name matching no rule stays
+# at the top level. Keep in sync with the experiment names in EXPERIMENTS.md.
+_TRAINING_GROUP_RULES: tuple[tuple[str, str], ...] = (
+    ("rgn", "region_specialists"),
+    ("xgbU_bagged", "unified_bags"),
+    ("xgbU_tuned", "unified_feature_campaign"),
+    ("xgbU_av2", "unified_bag_members"),
+    ("xgbU_d5_seed", "unified_bag_members"),
+    ("xgbU_seed", "unified_bag_members"),
+    ("xgbU_baseline", "unified_baselines"),
+    ("hgbU_", "hgb_dataset_versions"),
+    ("hgb_", "hgb_dataset_versions"),
+    ("xgb_tune_", "xgb_hyperparam_tuning"),
+    ("xgb_", "xgb_baselines"),
+    ("blend_", "blends"),
+    ("two_stage_", "blends"),
+)
+
+
+def _training_group(exp_name: str) -> str | None:
+    """Group subfolder for ``exp_name``, or None to stay at the top level."""
+    for prefix, group in _TRAINING_GROUP_RULES:
+        if exp_name.startswith(prefix):
+            return group
+    return None
+
+
 def claim_training_exp_dir(exp_name: str) -> Path:
-    """Create ``<storage>/artifacts/training/<exp_name>``. Raises if it exists."""
+    """Create the experiment's directory. Raises if it exists.
+
+    Lands in ``<training>/<group>/<exp_name>`` when a family prefix
+    matches, else ``<training>/<exp_name>``.
+    """
     name = _section_stem(exp_name)
-    path = get_training_artifacts_dir() / name
+    group = _training_group(name)
+    base = get_training_artifacts_dir()
+    if group is not None:
+        base = _ensure_dir(base / group)
+    path = base / name
     if path.exists():
         raise FileExistsError(
             f"training experiment {name!r} already exists: {path}"
@@ -249,9 +305,10 @@ def claim_training_exp_dir(exp_name: str) -> Path:
 
 
 def get_training_exp_dir(exp_name: str) -> Path:
-    """Return an existing ``<storage>/artifacts/training/<exp_name>`` directory."""
+    """Return an existing experiment directory (group-resolved, see above)."""
     name = _section_stem(exp_name)
-    path = get_training_artifacts_dir() / name
+    group = _training_group(name)
+    path = get_training_artifacts_dir() / (group or "") / name
     if not path.is_dir():
         raise FileNotFoundError(
             f"training experiment {name!r} not found: {path}"

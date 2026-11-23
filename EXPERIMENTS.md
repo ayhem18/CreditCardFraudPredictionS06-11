@@ -99,7 +99,8 @@ two schemes. All models retrained unchanged, only the CV differs.
 
 | exp | scope | OOF AUC |
 |---|---|---|
-| `xgbU_bagged_v1` (5 × tuned) | all rows | **0.94650** |
+| `xgbU_bagged_v2` (10 members, d5+d6) | all rows | **0.94671** |
+| `xgbU_bagged_v1` (5 × tuned) | all rows | 0.94650 |
 | `xgbU_bagged_v1` | alarm rows | **0.93397** |
 | `xgbU_bagged_v1` | no-alarm rows | **0.93187** |
 | `xgbU_tuned_v1` (lr .05 × 400) | all rows | 0.94526 |
@@ -132,20 +133,118 @@ Readings:
    0.94454; tuned 0.94526 vs 0.94543). fold 0 is consistently the
    easiest and fold 4 the hardest for every model, so that is fold
    composition, not model behavior.
-5. **Bagging the tuned config replicates (2026-11-19).** `xgbU_bagged_v1`
-   = probability mean of the full-sample tuned + 4 × stochastic members
-   (lr .05 × 400, subsample/colsample 0.8, seeds 7/13/21/2026):
-   **OOF 0.94650** — +0.0012 over the full-sample single, +0.0004 over
-   the best member (seed 2026, 0.94611). Every stochastic member
-   individually beats the full-sample tuned (0.94587–0.94611 vs 0.94526):
-   at lr .05 × 400, row/col subsampling works as regularization, not just
-   diversity. **LB 0.94668 — new competition best** (old bag 0.94659);
-   OOF ordering held again.
+5. **Bagging the tuned config replicates and keeps paying (2026-11-19/20).**
+   `xgbU_bagged_v1` = probability mean of the full-sample tuned + 4 ×
+   stochastic members (lr .05 × 400, subsample/colsample 0.8, seeds
+   7/13/21/2026): **OOF 0.94650**, +0.0012 over the full-sample single,
+   +0.0004 over the best member. Every stochastic member individually
+   beats the full-sample tuned: at lr .05 × 400, row/col subsampling
+   works as regularization, not just diversity. **LB 0.94668.**
+   `xgbU_bagged_v2` doubles the bag to 10 members (+ 2 depth-6 seeds
+   3/99, + 3 depth-5 seeds 7/13/2026): **OOF 0.94671, LB 0.94690 —
+   competition best**; the OOF delta (+0.0002) matched the LB delta
+   almost exactly. The depth-5 stochastic members are the three best
+   individuals (0.94643–0.94655) — depth 5 + subsampling is the
+   strongest single config found so far. Built with `build_bag.py`.
 
 Verdict: under a fair single scheme, per-region modeling is closed as a
 score lever (standalone and as a blend component). The paying direction
 stays the global XGB line — bagging the tuned config delivered +0.0012
 (`xgbU_bagged_v1` 0.94650, best OOF on this scheme).
+
+6. **Grid-decomposition probe (2026-11-20): explicit anchor/slot IDs
+   actively harm tuned XGB.** After the verification battery
+   (`experiments/eda/data_analysis/jitter_skeleton_check.py`) showed the
+   numerics live on exact decimal grids with conditional fraud signal in
+   the fine digits (within-anchor slot AUC up to 0.74 on
+   merchant_risk_score), the probe fed that structure to XGB explicitly
+   (`grid_slots` / `grid_slots_exact` dataset versions: floor-anchor ID +
+   fractional-slot ID as categoricals, + exact-value IDs for the 0.1-grid
+   columns). Tuned config, unified CV, free-drop control:
+
+   | exp | setup | OOF AUC | Δ vs `xgbU_tuned_v1` |
+   |---|---|---|---|
+   | `xgbU_tuned_v1` | control (all columns) | 0.94526 | — |
+   | `xgbU_tuned_free_drops` | − time/channel/card | 0.94526 | ±0.0000 |
+   | `xgbU_tuned_grid_slots` | + 12 grid IDs | **0.92359** | **−0.0217** |
+   | `xgbU_tuned_grid_exact` | + 12 IDs + 2 exact | 0.91718 | −0.0281 |
+
+   Every fold down ~0.02 — not noise. Reading: the high-cardinality
+   anchor IDs (1.4k / 5.6k levels) hand the greedy splitter cheap
+   memorization splits that crowd out generalizable numeric thresholds;
+   adding more IDs (exact) makes it worse. **Verdict: the raw-float
+   representation is not just sufficient — the explicit grid encoding
+   poisons tree learning. The verified grid signal is real but local,
+   and its pooled value is far below the encoding's cost.** Unseen-level
+   handling (mapped to missing, not nearest — the raw numeric column
+   already carries the position exactly) affects ≤0.08% of test rows,
+   immaterial. Possible follow-up: slots-only (no anchors) tests whether
+   the low-cardinality slots avoid the poisoning.
+
+7. **Rate-feature campaign (2026-11-20, ≤10 attempts, stopped at 6):
+   +0.0018 OOF from anchor statistics — the biggest feature win of the
+   competition.** After the ID poisoning, the slot/grid structure was
+   re-encoded as numeric reference features (user's proposal). Attempts
+   (tuned XGB, unified CV, control 0.94526):
+
+   | # | attempt | features | OOF | Δ |
+   |---|---|---|---|---|
+   | 1 | `slot_z` | (slot − mean_a)/std_a, target-free | 0.94525 | −0.0000 |
+   | 2 | `slot_refs` | fold-safe fraud/clean slot centroids | 0.94520 | −0.0001 |
+   | 3 | `anchor_freq` | log1p train count of floor anchor | 0.94554 | +0.0003 |
+   | 4 | `anchor_full` | + fold-safe anchor fraud rate (k=20) | 0.94654 | **+0.0013** |
+   | 5 | `anchor_v2` | + 0.1-grid rates (velocity/risk) + small-int rates | **0.94703** | **+0.0018** |
+   | 6 | `anchor_v3` | + (value × alarm) interaction rates | 0.94688 | +0.0016 (rejected) |
+   | 7 | `anchor_v2t` | + common decimal tilt (low blocks, fold-safe) | 0.94709 | +0.0018 (+0.00006 vs av2, flat — not adopted) |
+   | 8 | `anchor_v2c` | + combined va×ra anchor rate (logit-add of marginals) | 0.94704 | +0.0018 (+0.00001 vs av2, flat — not adopted) |
+   | 9 | `anchor_v2_is_alarm` | + `is_alarm` (OR of the five flags; flags kept) | 0.94679 | +0.0015 (−0.00024 vs av2, 3/5 folds down — not adopted) |
+
+   Attempt 7 (2026-11-22) came out of the hypothesis-first grid EDA
+   (`num_grid_eda.md` Q1→Q3→stability, notebooks under
+   `experiments/eda/numerical_grid_structure/`): one shared within-anchor
+   decimal tilt g(slot) per column in the resolved low blocks (velocity
+   ≤ 40, risk ≤ 55; risk permutation p = 0.010, velocity p = 0.075),
+   replicating across folds and common to every anchor (per-anchor
+   deviations from the shared tilt fully noise-sized, obs/sim 0.82-0.86).
+   Encoded fold-safe as `atilt_<col>` (10 levels, neutral 1.0 above the
+   block) on top of anchor_v2: +0.00006 — flat.
+   Attempt 8 (2026-11-22, user's call) made the joint-anchor finding
+   explicit: `acomb_velocity_risk` = sigmoid(logit(p_va) + logit(p_ra) −
+   logit(global)) from the two shrunk marginals (q1_joint_anchor_structure
+   showed the cell field IS this product, independence p = 0.796).
+   +0.00001 vs av2 — flat, as the joint analysis predicted: the product
+   adds nothing the trees can't assemble from the two marginals they
+   already have. The tilt is real but its
+   ±10% within-anchor rate modulation adds nothing beyond arate10's
+   value-level rates. anchor_v2 stays champion.
+   Attempt 9 was re-checked with a paired hyperparameter sweep before
+   rejection (2026-11-23, seed 42, lr 0.05, 400 trees, unified CV): depth
+   5, depth 5 + subsample/colsample 0.8, depth 6 + subsample/colsample
+   0.8, and min_child_weight 5, each on `anchor_v2` and on
+   `anchor_v2_is_alarm`. Deltas for `is_alarm` were −0.00024, +0.00013,
+   −0.00026, +0.00030, +0.00001. The only clear positive (+0.00030, depth
+   6 subsample) is the size of the old selection-noise rule and is not
+   the best config. The best single in the sweep is `anchor_v2` depth 5
+   + subsample/colsample 0.8 at **0.94806**; the same config with
+   `is_alarm` scores 0.94780 and is down in 5/5 folds.
+   `n_alarm_flags` on that same depth-5 subsample config
+   (`xgbU_tuned_av2_nflags`, 2026-11-23) scores 0.94780 versus 0.94806
+   (−0.00026, 0/5 folds). Not adopted.
+
+   Why it works: rarity and rate are **non-monotone in value** (popular
+   100, rare 101), so numeric thresholds cannot recover them and the IDs
+   poisoned the splitter — one shrunk scalar per row is the representation
+   trees can use. Slot-only signals stayed flat: the decimals matter only
+   through their value-level rate. All rates fold-safe (fold-train stats,
+   k=20 shrinkage; test rows use full-train payloads). Screens (label-side
+   AUC) picked the candidates before spending attempts; native-grid rate
+   leaky screens: risk 0.76, risk×alarm 0.83.
+
+   **Submissions:** `xgbU_tuned_av2` (single) OOF 0.94703 → **LB 0.94738**
+   (then-best). `xgbU_bagged_v3` (8 members on anchor_v2: full + 4 × d6
+   seeds + 3 × d5 seeds; d5 members again best individuals 0.9480-0.9481)
+   OOF **0.94824** → **LB 0.94829, competition best** (+0.0014 over the
+   pre-feature bag). OOF→LB now 9/9.
 
 ## 5. Feature-engineered dataset versions (global, HistGB, drop-column + transforms)
 
@@ -181,7 +280,13 @@ nothing to the global trees; profile percentiles added nothing globally.
 | 11-18 | xgb_bagged_v1 | 0.94659 |
 | 11-18 | xgb_tuned_v1 | 0.94637 |
 | 11-18 | blend_weighted_v1 | 0.94560 |
-| 11-19 | **xgbU_bagged_v1** (unified CV, tuned members) | **0.94668** |
+| 11-19 | xgbU_bagged_v1 (unified CV, tuned members) | 0.94668 |
+| 11-20 | xgbU_bagged_v2 (10 members, depth-mixed) | 0.94690 |
+| 11-20 | xgbU_tuned_av2 (anchor_v2 rate features, single) | 0.94738 |
+| 11-20 | xgbU_bagged_v3 (8 members on anchor_v2) | 0.94829 |
+| 11-21 | (ref 58687518, no description — submitted outside the ledger's sessions; provenance unknown) | 0.94850 |
+| 11-22 | xgbU_tuned_av2t (anchor_v2t tilt features, single) | 0.94757 |
+| 11-23 | **xgbU_tuned_av2_d5s** (anchor_v2, depth 5, subsample/colsample 0.8; OOF 0.94806) | **0.94858** |
 
 Note: LB differences under ~±0.001 between near-identical models are
 public-set noise (the 11-17 drop-ablation spread proves it); OOF ordering
