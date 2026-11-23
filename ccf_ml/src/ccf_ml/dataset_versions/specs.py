@@ -19,6 +19,13 @@ from ccf_ml.dataset_versions.constants import (
     DEVICE_TYPE_COLUMN,
     GRID_SLOTS_EXACT_TRANSFORM,
     GRID_SLOTS_TRANSFORM,
+    IC_CVV_RISKZ_TRANSFORM,
+    IC_CVV_TRANSFORM,
+    IC_DISPUTES_TRANSFORM,
+    IC_RISK_RATES_TRANSFORM,
+    IC_VELOCITY_RATES_TRANSFORM,
+    IC_RISKZ_FINE_TRANSFORM,
+    IC_RISKZ_TRANSFORM,
     IS_NEW_MERCHANT_COLUMN,
     RISK_AGGREGATES_TRANSFORM,
     PROFILE_CONTEXT_TRANSFORM,
@@ -389,5 +396,118 @@ DATASET_VERSION_SPECS: tuple[DatasetVersionSpec, ...] = (
         ),
         drop_columns=TIME_COLUMNS + (CHANNEL_COLUMN, CARD_TYPE_COLUMN),
         transform=ANCHOR_V3_TRANSFORM,
+    ),
+    DatasetVersionSpec(
+        name="intersection_conditional_base",
+        description=(
+            "Base for the intersection_conditional feature family: the full "
+            "anchor_v2 feature set (afreq + integer-anchor rates, arate10 "
+            "0.1-grid rates for velocity/risk, per-value rates for "
+            "customer_age / cvv_retry_count / txn_count_last_24h), but with "
+            "channel and card_type ADDED BACK (only the time columns are "
+            "dropped). The channel-conditional and device-conditional "
+            "features built on this base need the raw channel column in the "
+            "matrix, and card_type is restored alongside it. channel and "
+            "card_type were free drops for anchor_v2, so this base is "
+            "expected to match the champion within noise; attempt 1 measures "
+            "exactly that, so later gains are credited to the conditional "
+            "features and not the re-added categoricals."
+        ),
+        drop_columns=TIME_COLUMNS,
+        transform=ANCHOR_V2_TRANSFORM,
+    ),
+    DatasetVersionSpec(
+        name="intersection_conditional_disputes",
+        description=(
+            "intersection_conditional_base plus icrate_prior_disputes = the "
+            "fold-safe, k=20 shrunk per-value fraud rate of prior_disputes. "
+            "prior_disputes has no rate in anchor_v2, so this is a fully new "
+            "column (not an interaction yet): the marginal dispute-count "
+            "rate. Attempt 2 of the feature plan. Drops only the time "
+            "columns (channel and card_type kept)."
+        ),
+        drop_columns=TIME_COLUMNS,
+        transform=IC_DISPUTES_TRANSFORM,
+    ),
+    DatasetVersionSpec(
+        name="intersection_conditional_riskz",
+        description=(
+            "intersection_conditional_base plus the within-cell robust-z of "
+            "merchant_risk_score for the cell merchant_category x "
+            "is_new_merchant: iczs_merchant_risk_score (signed) and "
+            "icza_merchant_risk_score (absolute, non-monotone). Targets the "
+            "conditional risk outliers the champion misses (e.g. risk 55 in "
+            "a cell whose typical risk is ~34). Stats are target-free "
+            "(median / 1.4826*MAD, cells >= 200 rows, global fallback), so "
+            "no fold split is needed. Attempt 3 of the feature plan. Drops "
+            "only the time columns (channel and card_type kept)."
+        ),
+        drop_columns=TIME_COLUMNS,
+        transform=IC_RISKZ_TRANSFORM,
+    ),
+    DatasetVersionSpec(
+        name="intersection_conditional_cvv",
+        description=(
+            "intersection_conditional_base plus icrate_cvv_ctx = the "
+            "fold-safe, k=20 shrunk fraud rate of (cvv_retry_count x channel "
+            "x device_type). The base already holds the global cvv value "
+            "rate, so this is an interaction test: it pays only if the cvv "
+            "lift varies by channel and device. Attempt 4 of the feature "
+            "plan. Drops only the time columns (channel and card_type kept)."
+        ),
+        drop_columns=TIME_COLUMNS,
+        transform=IC_CVV_TRANSFORM,
+    ),
+    DatasetVersionSpec(
+        name="intersection_conditional_cvv_riskz",
+        description=(
+            "intersection_conditional_base plus both day-1 keeps: "
+            "icrate_cvv_ctx (cvv x channel x device fraud rate) and the "
+            "merchant_category x is_new_merchant robust-z of "
+            "merchant_risk_score (iczs_ / icza_). The day-2 combine of "
+            "attempts 3 and 4, each a sub-bar positive that lifted the hard "
+            "folds. Drops only the time columns (channel and card_type kept)."
+        ),
+        drop_columns=TIME_COLUMNS,
+        transform=IC_CVV_RISKZ_TRANSFORM,
+    ),
+    DatasetVersionSpec(
+        name="intersection_conditional_riskz_fine",
+        description=(
+            "intersection_conditional_base plus the fine-cell robust-z of "
+            "merchant_risk_score: iczs_risk_fine (signed) and icza_risk_fine "
+            "(absolute) within the full 7-atom behavioural profile with "
+            "drop-one escalation (finest cell >= 200 rows, else the largest "
+            "single-atom-dropped cell, else global). Encodes a local risk "
+            "norm the trees cannot assemble. Target-free stats. Attempt 5 of "
+            "the feature plan (the real B1). Drops only the time columns."
+        ),
+        drop_columns=TIME_COLUMNS,
+        transform=IC_RISKZ_FINE_TRANSFORM,
+    ),
+    DatasetVersionSpec(
+        name="intersection_conditional_risk_rates",
+        description=(
+            "intersection_conditional_base plus three fold-safe (k=20) fraud "
+            "rates of floor(merchant_risk_score) conditioned on "
+            "merchant_category, auth_method, and merchant_category x "
+            "auth_method (icrate_risk_merchant / _auth / _merchant_auth). "
+            "The rate analog of the risk distribution-shift. Drops only the "
+            "time columns (channel and card_type kept)."
+        ),
+        drop_columns=TIME_COLUMNS,
+        transform=IC_RISK_RATES_TRANSFORM,
+    ),
+    DatasetVersionSpec(
+        name="intersection_conditional_velocity_rates",
+        description=(
+            "intersection_conditional_base plus three fold-safe (k=20) fraud "
+            "rates of floor(velocity_score) conditioned on merchant_category, "
+            "auth_method, and merchant_category x auth_method "
+            "(icrate_vel_merchant / _auth / _merchant_auth). Drops only the "
+            "time columns (channel and card_type kept)."
+        ),
+        drop_columns=TIME_COLUMNS,
+        transform=IC_VELOCITY_RATES_TRANSFORM,
     ),
 )

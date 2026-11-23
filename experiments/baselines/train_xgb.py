@@ -48,6 +48,9 @@ from ccf_ml.dataset_versions.constants import (
     ANCHOR_TILT_FILENAME,
     ANCHOR_V2_RATES_FILENAME,
     ANCHOR_V3_RATES_FILENAME,
+    IC_CELLZ_FILENAME,
+    IC_RATES_FILENAME,
+    IC_RISKZ_FINE_FILENAME,
     IS_ALARM_COLUMN,
     N_ALARM_FLAGS_COLUMN,
     SLOT_REFS_FILENAME,
@@ -64,6 +67,9 @@ from ccf_ml.dataset_versions.transforms import (
     apply_anchor_tilt_to_test,
     apply_anchor_v2_rates_to_test,
     apply_anchor_v3_rates_to_test,
+    apply_cellz_to_test,
+    apply_ic_rates_to_test,
+    apply_riskz_fine_to_test,
     attach_is_alarm,
     attach_n_alarm_flags,
     apply_slot_refs_to_test,
@@ -328,6 +334,15 @@ def main() -> None:
         anchor_v3_path = dataset_version.dir / ANCHOR_V3_RATES_FILENAME
         if anchor_v3_path.exists():
             test_frame = apply_anchor_v3_rates_to_test(test_frame, anchor_v3_path)
+        ic_rates_path = dataset_version.dir / IC_RATES_FILENAME
+        if ic_rates_path.exists():
+            test_frame = apply_ic_rates_to_test(test_frame, ic_rates_path)
+        ic_cellz_path = dataset_version.dir / IC_CELLZ_FILENAME
+        if ic_cellz_path.exists():
+            test_frame = apply_cellz_to_test(test_frame, ic_cellz_path)
+        ic_riskz_fine_path = dataset_version.dir / IC_RISKZ_FINE_FILENAME
+        if ic_riskz_fine_path.exists():
+            test_frame = apply_riskz_fine_to_test(test_frame, ic_riskz_fine_path)
         if IS_ALARM_COLUMN in feature_columns:
             test_frame = attach_is_alarm(test_frame)
         if N_ALARM_FLAGS_COLUMN in feature_columns:

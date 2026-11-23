@@ -9,7 +9,7 @@ order; id and target columns pass through untouched.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable
+from typing import Callable, NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -67,6 +67,22 @@ from ccf_ml.dataset_versions.constants import (
     COMBINED_RATE_COLUMNS,
     COMBINED_RATE_SHRINKAGE,
     ANCHOR_COMBINED_COLUMN,
+    IC_CELLZ_FILENAME,
+    IC_CELLZ_MIN_ROWS,
+    IC_CVV_RISKZ_TRANSFORM,
+    IC_CVV_TRANSFORM,
+    IC_DISPUTES_TRANSFORM,
+    IC_RATE_PREFIX,
+    IC_RATE_SHRINKAGE,
+    IC_RATES_FILENAME,
+    IC_RISK_RATES_TRANSFORM,
+    IC_VELOCITY_RATES_TRANSFORM,
+    IC_RISKZ_FINE_ATOMS,
+    IC_RISKZ_FINE_FILENAME,
+    IC_RISKZ_FINE_TRANSFORM,
+    IC_RISKZ_TRANSFORM,
+    IC_ZABS_PREFIX,
+    IC_ZSIGNED_PREFIX,
     NATIVE_RATE_COLUMNS,
     SMALLINT_RATE_COLUMNS,
     TILT_COLUMNS,
@@ -1461,6 +1477,573 @@ def apply_anchor_v2_rates_to_test(
     )
 
 
+# ---------------------------------------------------------------------------
+# intersection_conditional rate layer
+#
+# A self-describing fold-safe rate feature. Each IcRate names an output
+# column and the columns whose (discretized) values compose the group key.
+# ``modes`` says how to turn each key column into a key part: "value",
+# "floor" or "tenth" for numerics (via :func:`_rate_keys`), or "raw" for a
+# categorical used as-is. The same recipe is stored in the payload so the
+# test side rebuilds the key without a hardcoded source list. Shared by
+# every intersection_conditional_* rate version (marginal and context).
+
+
+class IcRate(NamedTuple):
+    """One rate feature: output column and its composite group key."""
+
+    output: str
+    key_cols: tuple[str, ...]
+    modes: tuple[str, ...]
+
+
+def _ic_key(frame: pd.DataFrame, key_cols: tuple[str, ...], modes: tuple[str, ...]) -> np.ndarray:
+    """String group key per row, parts joined with '|'."""
+    parts: list[pd.Series] = []
+    for column, mode in zip(key_cols, modes):
+        if mode == "raw":
+            part = frame[column].astype(str)
+        else:
+            part = pd.Series(
+                _rate_keys(frame[column], mode).astype(str), index=frame.index
+            )
+        parts.append(part)
+    key = parts[0]
+    for part in parts[1:]:
+        key = key.str.cat(part, sep="|")
+    return key.to_numpy()
+
+
+def _ic_rate_table(
+    frame: pd.DataFrame,
+    rates: tuple[IcRate, ...],
+    target: np.ndarray,
+    *,
+    shrink: int,
+) -> pd.DataFrame:
+    """Long per-(output, key) shrunk fraud-rate table, recipe embedded."""
+    global_rate = float(target.mean())
+    rows: list[dict[str, object]] = []
+    for rate in rates:
+        keys = _ic_key(frame, rate.key_cols, rate.modes)
+        stats = pd.DataFrame({"key": keys, "y": target})
+        agg = stats.groupby("key")["y"].agg(["sum", "size"])
+        key_cols_text = "|".join(rate.key_cols)
+        modes_text = "|".join(rate.modes)
+        for key_value, row in agg.iterrows():
+            rows.append(
+                {
+                    "output": rate.output,
+                    "key": str(key_value),
+                    "fraud_rate": (float(row["sum"]) + shrink * global_rate)
+                    / (float(row["size"]) + shrink),
+                    "n_rows": int(row["size"]),
+                    "n_fraud": int(row["sum"]),
+                    "key_cols": key_cols_text,
+                    "modes": modes_text,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _apply_ic_rates(
+    target_frame: pd.DataFrame,
+    rates: tuple[IcRate, ...],
+    table: pd.DataFrame,
+    *,
+    fallback_rate: float,
+) -> pd.DataFrame:
+    """Map each IcRate output onto ``target_frame`` from its (output, key) table."""
+    out = target_frame.copy()
+    for rate in rates:
+        sub = table[table["output"] == rate.output]
+        rate_map = dict(zip(sub["key"], sub["fraud_rate"]))
+        keys = _ic_key(target_frame, rate.key_cols, rate.modes)
+        values = (
+            pd.Series(keys, index=target_frame.index)
+            .map(rate_map)
+            .fillna(fallback_rate)
+        )
+        out[rate.output] = values.to_numpy()
+    return out
+
+
+def _ic_rate_features(
+    frame: pd.DataFrame,
+    folds: FlagStratifiedCv,
+    rates: tuple[IcRate, ...],
+    *,
+    shrink: int,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """OOF-safe IcRate columns (per-fold) and the full-train payload table."""
+    target = frame[TARGET_COLUMN].to_numpy(dtype=bool)
+    fold_of = _fold_of_row(frame, folds)
+    global_rate = float(target.mean())
+    outputs = [rate.output for rate in rates]
+    pieces: list[pd.DataFrame] = []
+    for fold_id in range(folds.n_splits):
+        sel = fold_of == fold_id
+        train_part = frame.loc[~sel]
+        table = _ic_rate_table(
+            train_part,
+            rates,
+            train_part[TARGET_COLUMN].to_numpy(dtype=bool),
+            shrink=shrink,
+        )
+        applied = _apply_ic_rates(
+            frame.loc[sel], rates, table, fallback_rate=global_rate
+        )
+        pieces.append(applied[outputs])
+    features = pd.concat(pieces)
+    if len(features) != len(frame) or features.index.duplicated().any():
+        raise ValueError("ic rate features lost or duplicated rows")
+    features = features.loc[frame.index]
+    for column in outputs:
+        if features[column].isna().any():
+            raise ValueError(f"ic rate feature {column!r} has NaNs")
+    full_table = _ic_rate_table(frame, rates, target, shrink=shrink)
+    return features, full_table
+
+
+def _ic_rates_transform(
+    frame: pd.DataFrame, folds: FlagStratifiedCv, rates: tuple[IcRate, ...]
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """anchor_v2 features (channel + card_type kept) plus the given IcRates."""
+    out, extras = anchor_v2_transform(frame, folds)
+    features, table = _ic_rate_features(frame, folds, rates, shrink=IC_RATE_SHRINKAGE)
+    for column in features.columns:
+        out[column] = features[column].to_numpy()
+    extras[IC_RATES_FILENAME] = table
+    return out, extras
+
+
+IC_DISPUTES_RATES: tuple[IcRate, ...] = (
+    IcRate(IC_RATE_PREFIX + "prior_disputes", ("prior_disputes",), ("value",)),
+)
+
+
+def ic_disputes_transform(
+    frame: pd.DataFrame, folds: FlagStratifiedCv
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """Base features plus the marginal per-value fraud rate of prior_disputes.
+
+    prior_disputes has no rate in anchor_v2 (it is not in
+    ``SMALLINT_RATE_COLUMNS``), so icrate_prior_disputes is a fully new
+    column: the fold-safe, k-shrunk fraud rate of the row's dispute count.
+    """
+    return _ic_rates_transform(frame, folds, IC_DISPUTES_RATES)
+
+
+IC_CVV_RATES: tuple[IcRate, ...] = (
+    IcRate(
+        IC_RATE_PREFIX + "cvv_ctx",
+        ("cvv_retry_count", "channel", "device_type"),
+        ("value", "raw", "raw"),
+    ),
+)
+
+
+def ic_cvv_transform(
+    frame: pd.DataFrame, folds: FlagStratifiedCv
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """Base plus the fraud rate of (cvv_retry_count x channel x device_type).
+
+    The base already carries the GLOBAL cvv value rate, so icrate_cvv_ctx is
+    an interaction test: it only helps if the cvv lift varies by channel and
+    device beyond that marginal. Fold-safe, k-shrunk; unseen cells fall back
+    to the global rate.
+    """
+    return _ic_rates_transform(frame, folds, IC_CVV_RATES)
+
+
+def _anchor_cat_rates(numeric: str, tag: str) -> tuple[IcRate, ...]:
+    """Three fold-safe rates of floor(numeric) conditioned on merchant / auth / both."""
+    return (
+        IcRate(IC_RATE_PREFIX + f"{tag}_merchant",
+               (numeric, "merchant_category"), ("floor", "raw")),
+        IcRate(IC_RATE_PREFIX + f"{tag}_auth",
+               (numeric, "auth_method"), ("floor", "raw")),
+        IcRate(IC_RATE_PREFIX + f"{tag}_merchant_auth",
+               (numeric, "merchant_category", "auth_method"), ("floor", "raw", "raw")),
+    )
+
+
+IC_RISK_RATES: tuple[IcRate, ...] = _anchor_cat_rates("merchant_risk_score", "risk")
+IC_VELOCITY_RATES: tuple[IcRate, ...] = _anchor_cat_rates("velocity_score", "vel")
+
+
+def ic_risk_rates_transform(
+    frame: pd.DataFrame, folds: FlagStratifiedCv
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """Base plus fraud rate of floor(risk) within merchant / auth / both.
+
+    The rate analog of the risk distribution-shift: the base has the GLOBAL
+    floor(risk) rate (arate_merchant_risk_score); these condition it on the
+    cats whose level moves risk's distribution, testing whether a given risk
+    level means a different fraud rate in different merchant/auth contexts.
+    """
+    return _ic_rates_transform(frame, folds, IC_RISK_RATES)
+
+
+def ic_velocity_rates_transform(
+    frame: pd.DataFrame, folds: FlagStratifiedCv
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """Base plus fraud rate of floor(velocity) within merchant / auth / both."""
+    return _ic_rates_transform(frame, folds, IC_VELOCITY_RATES)
+
+
+def apply_ic_rates_to_test(
+    test_frame: pd.DataFrame, rates_path: Path
+) -> pd.DataFrame:
+    """Test-side IcRates using the version's self-describing full-train table."""
+    table = pd.read_parquet(rates_path)
+    rates = tuple(
+        IcRate(
+            output=str(output),
+            key_cols=tuple(sub["key_cols"].iloc[0].split("|")),
+            modes=tuple(sub["modes"].iloc[0].split("|")),
+        )
+        for output, sub in table.groupby("output")
+    )
+    fallback = float(table["fraud_rate"].dropna().mean())
+    return _apply_ic_rates(test_frame, rates, table, fallback_rate=fallback)
+
+
+# ---------------------------------------------------------------------------
+# intersection_conditional cell-z layer (target-free)
+#
+# A within-cell robust-z of a numeric: (value - cell median) / cell scale,
+# with scale = 1.4826 * MAD. Both the signed z (direction) and the absolute
+# z (non-monotone outlierness) are emitted. No label is used, so the cell
+# statistics are computed on the full train frame (like the anchor
+# frequencies) and reused unchanged for the test frame; the payload embeds
+# the key recipe so the test side rebuilds cells without a hardcoded source.
+
+
+class CellZ(NamedTuple):
+    """One within-cell robust-z: a source numeric and its grouping cell."""
+
+    source: str
+    key_cols: tuple[str, ...]
+    modes: tuple[str, ...]
+
+
+def _mad_scale(values: np.ndarray) -> float:
+    """1.4826 * median-absolute-deviation; nan when it cannot be formed."""
+    if len(values) == 0:
+        return float("nan")
+    median = float(np.median(values))
+    mad = float(np.median(np.abs(values - median)))
+    return 1.4826 * mad
+
+
+def _cellz_table(frame: pd.DataFrame, specs: tuple[CellZ, ...]) -> pd.DataFrame:
+    """Per-(source, cell key) median and robust scale, recipe embedded.
+
+    Global stats are stored under the sentinel key ``*`` and used as the
+    fallback for small or unseen cells (and for a degenerate zero scale).
+    """
+    rows: list[dict[str, object]] = []
+    for spec in specs:
+        values_all = frame[spec.source].to_numpy(dtype=np.float64)
+        global_median = float(np.median(values_all))
+        global_scale = _mad_scale(values_all)
+        if not np.isfinite(global_scale) or global_scale == 0.0:
+            global_scale = float(np.std(values_all)) or 1.0
+        keys = _ic_key(frame, spec.key_cols, spec.modes)
+        key_cols_text = "|".join(spec.key_cols)
+        modes_text = "|".join(spec.modes)
+        common = {
+            "source": spec.source,
+            "key_cols": key_cols_text,
+            "modes": modes_text,
+        }
+        rows.append(
+            {**common, "key": "*", "median": global_median, "scale": global_scale, "n_rows": int(len(values_all))}
+        )
+        grouped = pd.Series(values_all).groupby(keys)
+        for key_value, series in grouped:
+            vals = series.to_numpy()
+            if len(vals) < IC_CELLZ_MIN_ROWS:
+                continue
+            scale = _mad_scale(vals)
+            if not np.isfinite(scale) or scale == 0.0:
+                scale = global_scale
+            rows.append(
+                {
+                    **common,
+                    "key": str(key_value),
+                    "median": float(np.median(vals)),
+                    "scale": float(scale),
+                    "n_rows": int(len(vals)),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _apply_cellz(
+    target_frame: pd.DataFrame, specs: tuple[CellZ, ...], table: pd.DataFrame
+) -> pd.DataFrame:
+    """Add iczs_<source> (signed) and icza_<source> (absolute) z columns."""
+    out = target_frame.copy()
+    for spec in specs:
+        sub = table[table["source"] == spec.source]
+        glob = sub[sub["key"] == "*"].iloc[0]
+        g_median, g_scale = float(glob["median"]), float(glob["scale"])
+        median_map = dict(zip(sub["key"], sub["median"]))
+        scale_map = dict(zip(sub["key"], sub["scale"]))
+        keys = pd.Series(_ic_key(target_frame, spec.key_cols, spec.modes))
+        median = keys.map(median_map).fillna(g_median).to_numpy()
+        scale = keys.map(scale_map).fillna(g_scale).to_numpy()
+        scale = np.where(scale > 0.0, scale, g_scale)
+        value = target_frame[spec.source].to_numpy(dtype=np.float64)
+        signed = (value - median) / scale
+        out[IC_ZSIGNED_PREFIX + spec.source] = signed
+        out[IC_ZABS_PREFIX + spec.source] = np.abs(signed)
+    return out
+
+
+def _ic_cellz_transform(
+    frame: pd.DataFrame, folds: FlagStratifiedCv, specs: tuple[CellZ, ...]
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """anchor_v2 features (channel + card_type kept) plus within-cell z scores."""
+    out, extras = anchor_v2_transform(frame, folds)
+    table = _cellz_table(frame, specs)
+    applied = _apply_cellz(frame, specs, table)
+    for spec in specs:
+        for column in (IC_ZSIGNED_PREFIX + spec.source, IC_ZABS_PREFIX + spec.source):
+            out[column] = applied[column].to_numpy()
+            if out[column].isna().any():
+                raise ValueError(f"ic cell-z feature {column!r} has NaNs")
+    extras[IC_CELLZ_FILENAME] = table
+    return out, extras
+
+
+IC_RISKZ_SPECS: tuple[CellZ, ...] = (
+    CellZ("merchant_risk_score", ("merchant_category", "is_new_merchant"), ("raw", "raw")),
+)
+
+
+def ic_riskz_transform(
+    frame: pd.DataFrame, folds: FlagStratifiedCv
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """Base plus robust-z of merchant_risk_score within merchant x is_new.
+
+    iczs_ is the signed z (how far above/below the cell's typical risk);
+    icza_ is its magnitude (non-monotone outlierness, the shape no raw-risk
+    threshold reproduces). Stats are target-free (median / MAD), so they are
+    formed on the full train frame and reused for the test frame.
+    """
+    return _ic_cellz_transform(frame, folds, IC_RISKZ_SPECS)
+
+
+def _ic_full_transform(
+    frame: pd.DataFrame,
+    folds: FlagStratifiedCv,
+    rates: tuple[IcRate, ...],
+    cellz: tuple[CellZ, ...],
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """Base features plus any IcRates and any CellZ features, in one matrix."""
+    out, extras = anchor_v2_transform(frame, folds)
+    if rates:
+        features, table = _ic_rate_features(
+            frame, folds, rates, shrink=IC_RATE_SHRINKAGE
+        )
+        for column in features.columns:
+            out[column] = features[column].to_numpy()
+        extras[IC_RATES_FILENAME] = table
+    if cellz:
+        ctable = _cellz_table(frame, cellz)
+        applied = _apply_cellz(frame, cellz, ctable)
+        for spec in cellz:
+            for column in (
+                IC_ZSIGNED_PREFIX + spec.source,
+                IC_ZABS_PREFIX + spec.source,
+            ):
+                out[column] = applied[column].to_numpy()
+                if out[column].isna().any():
+                    raise ValueError(f"ic cell-z feature {column!r} has NaNs")
+        extras[IC_CELLZ_FILENAME] = ctable
+    return out, extras
+
+
+def ic_cvv_riskz_transform(
+    frame: pd.DataFrame, folds: FlagStratifiedCv
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """Base plus the cvv context rate and the risk within-cell robust-z.
+
+    The day-2 combine of the two day-1 keeps (attempts 3 and 4): each was a
+    sub-bar positive that lifted the hard folds, so the combine tests
+    whether they stack past the submission bar.
+    """
+    return _ic_full_transform(frame, folds, IC_CVV_RATES, IC_RISKZ_SPECS)
+
+
+def apply_cellz_to_test(
+    test_frame: pd.DataFrame, cellz_path: Path
+) -> pd.DataFrame:
+    """Test-side cell-z using the version's self-describing stat table."""
+    table = pd.read_parquet(cellz_path)
+    specs = tuple(
+        CellZ(
+            source=str(source),
+            key_cols=tuple(sub["key_cols"].iloc[0].split("|")),
+            modes=tuple(sub["modes"].iloc[0].split("|")),
+        )
+        for source, sub in table.groupby("source")
+    )
+    return _apply_cellz(test_frame, specs, table)
+
+
+# ---------------------------------------------------------------------------
+# fine-cell risk robust-z (full 7-atom profile, drop-one escalation)
+#
+# iczs_risk_fine / icza_risk_fine: the signed and absolute robust-z of
+# merchant_risk_score inside the finest behavioural cell with enough rows.
+# Unlike the coarse merchant x is_new version, this encodes a LOCAL risk
+# norm a depth-5/6 tree cannot assemble (reach a 7-way cell AND rank within
+# it). Target-free (median / MAD), so no fold split; the cell assignment is
+# label-free too.
+
+IC_RISKZ_FINE_SOURCE = "merchant_risk_score"
+IC_RISKZ_FINE_ZSIGNED = IC_ZSIGNED_PREFIX + "risk_fine"
+IC_RISKZ_FINE_ZABS = IC_ZABS_PREFIX + "risk_fine"
+_RISKZ_FINE_DROP_LEVELS = tuple(
+    tuple(atom for atom in IC_RISKZ_FINE_ATOMS if atom != dropped)
+    for dropped in IC_RISKZ_FINE_ATOMS
+)
+
+
+def _with_alarm(frame: pd.DataFrame) -> pd.DataFrame:
+    """Return frame with the boolean is_alarm column present."""
+    if "is_alarm" in frame.columns:
+        return frame
+    out = frame.copy()
+    out["is_alarm"] = alarm_flag_mask(frame).to_numpy(dtype=bool)
+    return out
+
+
+def _combo_key(frame: pd.DataFrame, cols: tuple[str, ...]) -> np.ndarray:
+    """'|'-joined string key over several categorical columns."""
+    key = frame[cols[0]].astype(str)
+    for column in cols[1:]:
+        key = key.str.cat(frame[column].astype(str), sep="|")
+    return key.to_numpy()
+
+
+def _riskz_fine_table(frame: pd.DataFrame) -> pd.DataFrame:
+    """Per-(level, cell) median and robust scale for cells >= min rows.
+
+    Level ``*`` holds the global stats (fallback). ``full7`` is the whole
+    profile; ``drop:<atom>`` each single-atom-dropped profile. Cells below
+    the row threshold are omitted, so presence in the table means eligible.
+    """
+    work = _with_alarm(frame)
+    risk = work[IC_RISKZ_FINE_SOURCE].to_numpy(dtype=np.float64)
+    global_median = float(np.median(risk))
+    global_scale = _mad_scale(risk)
+    if not np.isfinite(global_scale) or global_scale == 0.0:
+        global_scale = float(np.std(risk)) or 1.0
+    rows: list[dict[str, object]] = [
+        {"level": "*", "key": "*", "median": global_median,
+         "scale": global_scale, "n_rows": int(len(risk))}
+    ]
+    levels = [("full7", IC_RISKZ_FINE_ATOMS)] + [
+        (f"drop:{dropped}", cols)
+        for dropped, cols in zip(IC_RISKZ_FINE_ATOMS, _RISKZ_FINE_DROP_LEVELS)
+    ]
+    for level, cols in levels:
+        keys = _combo_key(work, cols)
+        for key_value, series in pd.Series(risk).groupby(keys):
+            vals = series.to_numpy()
+            if len(vals) < IC_CELLZ_MIN_ROWS:
+                continue
+            scale = _mad_scale(vals)
+            if not np.isfinite(scale) or scale == 0.0:
+                scale = global_scale
+            rows.append({
+                "level": level, "key": str(key_value),
+                "median": float(np.median(vals)), "scale": float(scale),
+                "n_rows": int(len(vals)),
+            })
+    return pd.DataFrame(rows)
+
+
+def _apply_riskz_fine(frame: pd.DataFrame, table: pd.DataFrame) -> pd.DataFrame:
+    """Add iczs_risk_fine / icza_risk_fine using the escalation table."""
+    work = _with_alarm(frame)
+    risk = work[IC_RISKZ_FINE_SOURCE].to_numpy(dtype=np.float64)
+    n = len(work)
+    glob = table[table["level"] == "*"].iloc[0]
+    g_median, g_scale = float(glob["median"]), float(glob["scale"])
+    maps = {
+        level: (
+            dict(zip(sub["key"], sub["median"])),
+            dict(zip(sub["key"], sub["scale"])),
+            dict(zip(sub["key"], sub["n_rows"])),
+        )
+        for level, sub in table.groupby("level")
+    }
+    median = np.full(n, g_median)
+    scale = np.full(n, g_scale)
+    assigned = np.zeros(n, dtype=bool)
+
+    full_median, full_scale, _ = maps.get("full7", ({}, {}, {}))
+    full_key = pd.Series(_combo_key(work, IC_RISKZ_FINE_ATOMS))
+    fm = full_key.map(full_median).to_numpy()
+    hit = ~pd.isna(fm)
+    median[hit] = fm[hit]
+    scale[hit] = full_key.map(full_scale).to_numpy()[hit]
+    assigned |= hit
+
+    # remaining rows: best (largest-n) single-atom-dropped cell
+    drop_n = np.zeros((n, len(IC_RISKZ_FINE_ATOMS)))
+    drop_med = np.full((n, len(IC_RISKZ_FINE_ATOMS)), np.nan)
+    drop_scl = np.full((n, len(IC_RISKZ_FINE_ATOMS)), np.nan)
+    for j, (dropped, cols) in enumerate(zip(IC_RISKZ_FINE_ATOMS, _RISKZ_FINE_DROP_LEVELS)):
+        dm, ds, dn = maps.get(f"drop:{dropped}", ({}, {}, {}))
+        key = pd.Series(_combo_key(work, cols))
+        drop_n[:, j] = key.map(dn).fillna(0).to_numpy()
+        drop_med[:, j] = key.map(dm).to_numpy()
+        drop_scl[:, j] = key.map(ds).to_numpy()
+    best = drop_n.argmax(axis=1)
+    rows_idx = np.arange(n)
+    best_n = drop_n[rows_idx, best]
+    use_drop = (~assigned) & (best_n > 0)
+    median[use_drop] = drop_med[rows_idx, best][use_drop]
+    scale[use_drop] = drop_scl[rows_idx, best][use_drop]
+    assigned |= use_drop
+
+    scale = np.where((scale > 0) & np.isfinite(scale), scale, g_scale)
+    signed = (risk - median) / scale
+    out = frame.copy()
+    out[IC_RISKZ_FINE_ZSIGNED] = signed
+    out[IC_RISKZ_FINE_ZABS] = np.abs(signed)
+    return out
+
+
+def ic_riskz_fine_transform(
+    frame: pd.DataFrame, folds: FlagStratifiedCv
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """Base plus risk robust-z within the escalated full behavioural cell."""
+    out, extras = anchor_v2_transform(frame, folds)
+    table = _riskz_fine_table(frame)
+    applied = _apply_riskz_fine(frame, table)
+    for column in (IC_RISKZ_FINE_ZSIGNED, IC_RISKZ_FINE_ZABS):
+        out[column] = applied[column].to_numpy()
+        if out[column].isna().any():
+            raise ValueError(f"fine risk-z feature {column!r} has NaNs")
+    extras[IC_RISKZ_FINE_FILENAME] = table
+    return out, extras
+
+
+def apply_riskz_fine_to_test(
+    test_frame: pd.DataFrame, table_path: Path
+) -> pd.DataFrame:
+    """Test-side fine risk-z using the version's escalation table."""
+    return _apply_riskz_fine(test_frame, pd.read_parquet(table_path))
+
+
 TRANSFORMS: dict[str, TransformFn] = {
     RISK_CONTEXT_TRANSFORM: risk_context_transform,
     RISK_AGGREGATES_TRANSFORM: risk_aggregates_transform,
@@ -1477,6 +2060,13 @@ TRANSFORMS: dict[str, TransformFn] = {
     ANCHOR_V2C_TRANSFORM: anchor_v2c_transform,
     ANCHOR_V2T_TRANSFORM: anchor_v2t_transform,
     ANCHOR_V3_TRANSFORM: anchor_v3_transform,
+    IC_DISPUTES_TRANSFORM: ic_disputes_transform,
+    IC_CVV_TRANSFORM: ic_cvv_transform,
+    IC_RISK_RATES_TRANSFORM: ic_risk_rates_transform,
+    IC_VELOCITY_RATES_TRANSFORM: ic_velocity_rates_transform,
+    IC_RISKZ_TRANSFORM: ic_riskz_transform,
+    IC_CVV_RISKZ_TRANSFORM: ic_cvv_riskz_transform,
+    IC_RISKZ_FINE_TRANSFORM: ic_riskz_fine_transform,
 }
 
 

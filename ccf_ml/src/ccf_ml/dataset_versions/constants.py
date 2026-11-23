@@ -199,3 +199,42 @@ ANCHOR_COMBINED_FILENAME = "anchor_combined_rate.parquet"
 ANCHOR_COMBINED_COLUMN = "acomb_velocity_risk"
 COMBINED_RATE_COLUMNS = ("velocity_score", "merchant_risk_score")
 COMBINED_RATE_SHRINKAGE = 20
+
+# ---------------------------------------------------------------------------
+# intersection_conditional family: anchor_v2 features (channel + card_type
+# kept) plus self-describing fold-safe rate features whose keys may compose
+# several columns (value-mode numerics and raw-mode categoricals). One
+# payload carries the full-train rate table and its own key recipe, so the
+# test side rebuilds keys without a hardcoded source list.
+IC_RATE_PREFIX = "icrate_"
+IC_RATES_FILENAME = "ic_rates.parquet"
+IC_RATE_SHRINKAGE = 20
+IC_DISPUTES_TRANSFORM = "intersection_conditional_disputes"
+IC_CVV_TRANSFORM = "intersection_conditional_cvv"
+IC_RISK_RATES_TRANSFORM = "intersection_conditional_risk_rates"
+IC_VELOCITY_RATES_TRANSFORM = "intersection_conditional_velocity_rates"
+
+# Target-free within-cell robust-z features: (value - cell median) / cell
+# scale, scale = 1.4826 * cell MAD (falls back to the global scale for
+# degenerate or unseen cells). No label is used, so these are computed on
+# the full train frame like the anchor frequencies. Signed and absolute
+# (non-monotone) columns are both emitted. One self-describing payload.
+IC_CELLZ_FILENAME = "ic_cellz.parquet"
+IC_ZSIGNED_PREFIX = "iczs_"
+IC_ZABS_PREFIX = "icza_"
+IC_CELLZ_MIN_ROWS = 200
+IC_RISKZ_TRANSFORM = "intersection_conditional_riskz"
+IC_CVV_RISKZ_TRANSFORM = "intersection_conditional_cvv_riskz"
+
+# Fine-cell risk robust-z: (risk - cell median) / cell scale within the full
+# 7-atom behavioural profile, with drop-one escalation (finest cell with
+# >= IC_CELLZ_MIN_ROWS, else the largest single-atom-dropped cell, else the
+# global stats). Target-free, so computed on the full train frame. The
+# payload stores the per-(level, cell) median/scale; the test side rebuilds
+# the same escalation from it.
+IC_RISKZ_FINE_TRANSFORM = "intersection_conditional_riskz_fine"
+IC_RISKZ_FINE_FILENAME = "ic_riskz_fine.parquet"
+IC_RISKZ_FINE_ATOMS = (
+    "channel", "device_type", "is_new_merchant", "merchant_category",
+    "is_alarm", "card_type", "auth_method",
+)

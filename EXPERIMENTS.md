@@ -287,6 +287,19 @@ nothing to the global trees; profile percentiles added nothing globally.
 | 11-21 | (ref 58687518, no description — submitted outside the ledger's sessions; provenance unknown) | 0.94850 |
 | 11-22 | xgbU_tuned_av2t (anchor_v2t tilt features, single) | 0.94757 |
 | 11-23 | **xgbU_tuned_av2_d5s** (anchor_v2, depth 5, subsample/colsample 0.8; OOF 0.94806) | **0.94858** |
+| 11-23 | icU_riskz (intersection_conditional base + merchant×is_new risk robust-z; OOF 0.94832) | 0.94855 |
+| 11-23 | **icU_blend4** (rank-mean of av2_d5s + ic_base + ic_riskz + ic_cvv; OOF 0.94862) | **0.94872** |
+
+Note on the intersection_conditional line (2026-11-23, see
+`experiments/eda/profile_interactions/`): per-feature conditional columns
+(risk/cvv/velocity robust-z, value×context rates) are each only ~+0.0001
+OOF and null-to-tied on the LB (icU_riskz 0.94855 ≈ champion), and a
+buried-fraud screen shows they add no discriminative power on the frauds
+the champion misses (those sit at typical within-cell positions). Their
+value is purely as **blend diversity**: a rank-mean of four near-champion
+models (0.99-correlated) reached LB **0.94872**, +0.00014 over the best
+single — the paying use is ensembling them, not stacking features into one
+model (the in-model cvv+riskz combine was worse than either single).
 
 Note: LB differences under ~±0.001 between near-identical models are
 public-set noise (the 11-17 drop-ablation spread proves it); OOF ordering
