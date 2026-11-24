@@ -25,7 +25,7 @@
     }
   },
   "experiment_config": {
-    "tokens_dir": "C:/Users/bouab/ayhem-personal/DEV/ML/DL_projects/kaggle_comps/CreditCardFraud/storage/artifacts/tabformer/tokens",
+    "tokens_dir": "data/tokens",
     "corpus": "all",
     "model": {
       "d_model": 128,

@@ -1,5 +1,7 @@
 # dl_toolbox project tree: track code + configs, ignore payloads and envs.
 storage/
+# token export (large .npy; copied in, not committed)
+data/tokens/
 .venv/
 *venv
 *.egg-info/
