@@ -1,0 +1,11 @@
+# dl_toolbox project tree: track code + configs, ignore payloads and envs.
+storage/
+.venv/
+*venv
+*.egg-info/
+__pycache__/
+*.py[oc]
+.pytest_cache/
+# mlflow / tensorboard local stores (also land under storage/, kept for safety)
+mlruns/
+*.sqlite

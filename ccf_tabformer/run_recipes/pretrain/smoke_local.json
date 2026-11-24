@@ -1,0 +1,51 @@
+{
+  "human_readable_name": "mfm_smoke_local",
+  "run_group": ["pretrain", "smoke"],
+  "seed": 0,
+  "trainer": {
+    "max_epochs": 3,
+    "accelerator": "gpu",
+    "devices": 1,
+    "precision": "bf16-mixed",
+    "enable_progress_bar": true,
+    "accumulate_grad_batches": 1
+  },
+  "checkpoint_policy": {
+    "save_top_k": 1,
+    "save_last": false
+  },
+  "early_stopping": {
+    "name": "none"
+  },
+  "logger": {
+    "experiment": "ccf_tabformer_pretrain",
+    "tags": {
+      "scope": "smoke",
+      "task": "mfm_pretrain"
+    }
+  },
+  "experiment_config": {
+    "tokens_dir": "C:/Users/bouab/ayhem-personal/DEV/ML/DL_projects/kaggle_comps/CreditCardFraud/storage/artifacts/tabformer/tokens",
+    "corpus": "all",
+    "model": {
+      "d_model": 128,
+      "n_layers": 2,
+      "n_heads": 4,
+      "ffn_mult": 4,
+      "dropout": 0.1
+    },
+    "data": {
+      "batch_size": 256,
+      "num_workers": 0,
+      "max_rows": 20000
+    },
+    "mask": {
+      "token_mask_prob": 0.1,
+      "feature_mask_prob": 0.07
+    },
+    "optimizer": {
+      "learning_rate": 0.0005,
+      "weight_decay": 0.01
+    }
+  }
+}

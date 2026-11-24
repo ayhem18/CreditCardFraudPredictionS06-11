@@ -1,0 +1,52 @@
+[project]
+name = "ccf_tabformer_dl"
+version = "0.1.0"
+description = "Tabular-BERT (digit-sequence MFM pretraining + fine-tune) for Kaggle S6E11 credit-card fraud."
+requires-python = ">=3.12"
+dependencies = [
+    "dl-toolbox[dl,mlflow]",
+    "pandas>=2.0",
+    "python-dotenv>=1.0.0",
+    "tqdm>=4.66.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.uv]
+# Project venv is ../.venv (at the project-tree root). Activate it, then `uv sync --active`.
+package = true
+
+[[tool.uv.index]]
+name = "pytorch-cu118"
+url = "https://download.pytorch.org/whl/cu118"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.uv.sources]
+dl-toolbox = { path = "../../../../dl_toolbox", editable = true }
+torch = [
+    { index = "pytorch-cu118", marker = "sys_platform == 'win32'" },
+    { index = "pytorch-cu124", marker = "sys_platform == 'linux'" },
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
