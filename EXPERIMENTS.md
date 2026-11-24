@@ -289,6 +289,32 @@ nothing to the global trees; profile percentiles added nothing globally.
 | 11-23 | **xgbU_tuned_av2_d5s** (anchor_v2, depth 5, subsample/colsample 0.8; OOF 0.94806) | **0.94858** |
 | 11-23 | icU_riskz (intersection_conditional base + merchant×is_new risk robust-z; OOF 0.94832) | 0.94855 |
 | 11-23 | **icU_blend4** (rank-mean of av2_d5s + ic_base + ic_riskz + ic_cvv; OOF 0.94862) | **0.94872** |
+| 11-23 | icU_blend6 (+ risk_rates + vel_rates) | 0.94877 |
+| 11-23 | **icU_te1_base** (per-value+digit TARGET-ENCODING model + base blend; OOF 0.94959) | **0.95013** |
+| 11-23 | **icU_stack1** (TE-XGB te1 + GLM on fingerprint-logits; OOF 0.95017) | **0.95062** |
+| 11-24 | icU_stack2 (6-family: TE-XGB + GLM + RealMLP + LGB + base + champion; OOF 0.95034) | pending |
+
+TE stack progress (2026-11-24): three decorrelated families on the TE
+encodings — TE-XGB (te1, OOF 0.94918), a **GLM** on the fingerprint-logits
+(0.94945, best single and most decorrelated), and **RealMLP** (0.94861 but
+corr only ~0.90 with the others — a genuinely different reader). The GLM
+alone took the blend to LB 0.95062; RealMLP adds the most diversity. Joint
+keys help the GLM, hurt the trees. Members/pipeline:
+`experiments/target_encoding/build_te_stack.py` + `build_realmlp.py`.
+
+**Direction change (2026-11-23/24): the step-change lever is target encoding
+the generator fingerprints, not more conditional features.** The data is
+synthetic (generator writes the label first, then each field via a language
+model), so the exact values and their decimal digits carry the label. Public
+notebooks reach 0.952–0.956 by out-of-fold target-encoding ~90 per-value /
+digit keys (+ joint pairs + GPT-2 token keys) and stacking diverse families
+(shallow trees + GLM + RealMLP). Our first build of this — `icU_te1`, a
+shallow XGB on ~60 per-value+digit OOF-TE keys — scored OOF 0.94918 single
+(+0.001 over base), and `icU_te1_base` (TE + anchor base, rank-mean) hit
+**LB 0.95013**, our first 0.95+ and +0.0014 over the prior best. Full
+plain-language write-up: `experiments/target_encoding/README.md`; pipeline:
+`experiments/target_encoding/build_te_model.py` (and `build_te_stack.py` adds
+joint keys + LightGBM + GLM members).
 
 Note on the intersection_conditional line (2026-11-23, see
 `experiments/eda/profile_interactions/`): per-feature conditional columns
