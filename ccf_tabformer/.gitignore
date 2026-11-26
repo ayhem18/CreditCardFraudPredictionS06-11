@@ -2,6 +2,8 @@
 storage/
 # token export (large .npy; copied in, not committed)
 data/tokens/
+# OOF/submission outputs (copied back to the competition repo for blending)
+outputs/
 .venv/
 *venv
 *.egg-info/
@@ -11,3 +13,5 @@ __pycache__/
 # mlflow / tensorboard local stores (also land under storage/, kept for safety)
 mlruns/
 *.sqlite
+# dl-toolbox: never commit remote-store credentials
+project_level_configs/remote/credentials/

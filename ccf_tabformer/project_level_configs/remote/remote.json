@@ -1,0 +1,8 @@
+{
+  "backend": "s3",
+  "bucket": "ccf_tabformer",
+  "endpoint_url": "http://10.1.11.11:10000", 
+  "region": "us-east-1",
+  "secure": false,
+  "addressing_style": "path"
+}

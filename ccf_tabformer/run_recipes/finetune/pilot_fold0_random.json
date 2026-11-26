@@ -1,0 +1,55 @@
+{
+  "human_readable_name": "ft_pilot_f0_random",
+  "run_group": ["finetune", "pilot_fold0"],
+  "seed": 0,
+  "trainer": {
+    "max_epochs": 15,
+    "accelerator": "gpu",
+    "devices": 1,
+    "precision": "bf16-mixed",
+    "enable_progress_bar": false,
+    "accumulate_grad_batches": 1
+  },
+  "checkpoint_policy": {
+    "save_top_k": 1,
+    "save_last": true
+  },
+  "early_stopping": {
+    "name": "none"
+  },
+  "logger": {
+    "experiment": "ccf_tabformer_finetune",
+    "tags": {
+      "scope": "pilot_fold0",
+      "regime": "random_init"
+    }
+  },
+  "experiment_config": {
+    "tokens_dir": "data/tokens",
+    "fold": 0,
+    "init": "random",
+    "freeze_encoder": false,
+    "pretrained_checkpoint": "",
+    "model": {
+      "d_model": 768,
+      "n_layers": 12,
+      "n_heads": 12,
+      "ffn_mult": 4,
+      "dropout": 0.1
+    },
+    "head": {
+      "hidden": 256,
+      "dropout": 0.1
+    },
+    "data": {
+      "batch_size": 1024,
+      "num_workers": 8,
+      "max_rows": 0
+    },
+    "optimizer": {
+      "learning_rate": 0.0003,
+      "weight_decay": 0.01,
+      "encoder_lr_mult": 1.0
+    }
+  }
+}
