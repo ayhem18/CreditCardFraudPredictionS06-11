@@ -16,7 +16,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from ccf_tabformer_dl.finetune.engine import make_finetune_engine
+from ccf_tabformer_dl.task_engines.finetune.engine import make_finetune_engine
 
 RECIPES_SUBDIR = "run_recipes/finetune"
 

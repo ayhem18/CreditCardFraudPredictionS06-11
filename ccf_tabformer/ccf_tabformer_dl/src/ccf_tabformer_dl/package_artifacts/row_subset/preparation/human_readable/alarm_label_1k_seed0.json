@@ -1,0 +1,22 @@
+{
+  "name": "alarm_label_1k_seed0",
+  "hash": "6b001070d7125f67a03333f95d3c66fbfedcf778d27395266170d9782d6cb01f",
+  "generating_process_signature": {
+    "strategy": "balanced_alarm_label",
+    "args": {
+      "inner_table_hash": "4f3d4ba556a20d9110bb23e7e59150faceff92120a2c9dcb227b2f8dd6286240",
+      "n_per_cell": 1000,
+      "seed": 0,
+      "split": "train",
+      "n_parent_rows": 999944,
+      "n_cells": 4,
+      "alarm_flag_columns": [
+        "ip_country_mismatch",
+        "is_ai_generated_scam_attempt",
+        "billing_shipping_mismatch",
+        "is_foreign_transaction",
+        "used_vpn"
+      ]
+    }
+  }
+}

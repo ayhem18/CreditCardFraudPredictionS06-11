@@ -1,0 +1,27 @@
+{
+  "hash": "779cdd077faf536f1208835f4084ad9a252cac905408c133be34b074f23b58b9",
+  "generating_process_name": "alarm_label_1k_seed0",
+  "generating_process_signature": {
+    "strategy": "balanced_alarm_label",
+    "args": {
+      "inner_table_hash": "4f3d4ba556a20d9110bb23e7e59150faceff92120a2c9dcb227b2f8dd6286240",
+      "n_per_cell": 1000,
+      "seed": 0,
+      "split": "train",
+      "n_parent_rows": 999944,
+      "n_cells": 4,
+      "alarm_flag_columns": [
+        "ip_country_mismatch",
+        "is_ai_generated_scam_attempt",
+        "billing_shipping_mismatch",
+        "is_foreign_transaction",
+        "used_vpn"
+      ]
+    }
+  },
+  "payload_meta": {
+    "n_rows": 4000,
+    "n_parent_rows": 999944,
+    "row_index_sha256": "0df2ae729d6ba351e4c573ba2f7fe3f71d4eb1577b8f0028f5c73f6bcff5d1be"
+  }
+}

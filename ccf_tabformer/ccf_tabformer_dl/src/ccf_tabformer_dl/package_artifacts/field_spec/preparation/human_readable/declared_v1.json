@@ -1,0 +1,119 @@
+{
+  "name": "declared_v1",
+  "hash": "1ee63409700e3d5674396be50df1ca14418172f36b498fcdd29b3b1c52640541",
+  "generating_process_signature": {
+    "strategy": "declared",
+    "args": {
+      "columns": [
+        {
+          "name": "amount_usd",
+          "role": "numeric"
+        },
+        {
+          "name": "distance_from_home_km",
+          "role": "numeric"
+        },
+        {
+          "name": "account_balance_usd",
+          "role": "numeric"
+        },
+        {
+          "name": "velocity_score",
+          "role": "numeric"
+        },
+        {
+          "name": "merchant_risk_score",
+          "role": "numeric"
+        },
+        {
+          "name": "hours_since_last_txn",
+          "role": "in_between",
+          "routing": "as_cat"
+        },
+        {
+          "name": "txn_count_last_24h",
+          "role": "in_between",
+          "routing": "as_cat"
+        },
+        {
+          "name": "card_age_months",
+          "role": "in_between",
+          "routing": "as_cat"
+        },
+        {
+          "name": "customer_age",
+          "role": "in_between",
+          "routing": "as_cat"
+        },
+        {
+          "name": "cvv_retry_count",
+          "role": "in_between",
+          "routing": "as_cat"
+        },
+        {
+          "name": "time_of_day_hour",
+          "role": "in_between",
+          "routing": "as_cat"
+        },
+        {
+          "name": "day_of_week",
+          "role": "in_between",
+          "routing": "as_cat"
+        },
+        {
+          "name": "prior_disputes",
+          "role": "in_between",
+          "routing": "as_cat"
+        },
+        {
+          "name": "merchant_category",
+          "role": "categorical"
+        },
+        {
+          "name": "card_type",
+          "role": "categorical"
+        },
+        {
+          "name": "auth_method",
+          "role": "categorical"
+        },
+        {
+          "name": "channel",
+          "role": "categorical"
+        },
+        {
+          "name": "device_type",
+          "role": "categorical"
+        },
+        {
+          "name": "is_foreign_transaction",
+          "role": "boolean"
+        },
+        {
+          "name": "is_new_merchant",
+          "role": "boolean"
+        },
+        {
+          "name": "used_vpn",
+          "role": "boolean"
+        },
+        {
+          "name": "ip_country_mismatch",
+          "role": "boolean"
+        },
+        {
+          "name": "billing_shipping_mismatch",
+          "role": "boolean"
+        },
+        {
+          "name": "is_ai_generated_scam_attempt",
+          "role": "boolean"
+        }
+      ],
+      "corrected_table": {
+        "train_sha256": "c443c0a4dd51437b91c6f29fbfe2641b47610432408b1ee18af51896af650f9c",
+        "test_sha256": "31caa34508c09525c805a311c2c67b8a2a691a455fbd474ffa586fbfb3934d33"
+      }
+    }
+  }
+}

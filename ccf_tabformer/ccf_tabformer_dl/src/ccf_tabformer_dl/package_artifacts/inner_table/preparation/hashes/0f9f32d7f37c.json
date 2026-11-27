@@ -1,0 +1,14 @@
+{
+  "name": "fixed_width_v1",
+  "hash": "0f9f32d7f37cdc56eb1c1bafbd3cb4ac26e8b7f16d1b8053d6eefb62559ec0a7",
+  "generating_process_signature": {
+    "strategy": "fixed_width_padded",
+    "args": {
+      "vocabulary_hash": "8ea760f9f163ed2e90cafcdec206dff4ac9ab74f5ea29c530bd16184172c5b9f",
+      "corrected_table": {
+        "train_sha256": "c443c0a4dd51437b91c6f29fbfe2641b47610432408b1ee18af51896af650f9c",
+        "test_sha256": "31caa34508c09525c805a311c2c67b8a2a691a455fbd474ffa586fbfb3934d33"
+      }
+    }
+  }
+}

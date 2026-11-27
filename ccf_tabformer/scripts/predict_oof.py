@@ -25,11 +25,11 @@ import pandas as pd
 import torch
 from sklearn.metrics import roc_auc_score
 
-from ccf_tabformer_dl.data.tokens import load_tokenized_table
-from ccf_tabformer_dl.finetune.config import FineTuneConfig
-from ccf_tabformer_dl.model.classifier import FineTuneModel, HeadConfig, load_finetune_checkpoint
-from ccf_tabformer_dl.model.network import TabFormerConfig
-from ccf_tabformer_dl.model.vocab import build_global_vocab, to_global_ids
+from ccf_tabformer_dl.data_contract.tokens import load_tokenized_table
+from ccf_tabformer_dl.task_engines.finetune.config import FineTuneConfig
+from ccf_tabformer_dl.tabformer_components.model.classifier import FineTuneModel, HeadConfig, load_finetune_checkpoint
+from ccf_tabformer_dl.tabformer_components.model.network import TabFormerConfig
+from ccf_tabformer_dl.tabformer_components.model.vocab import build_global_vocab, to_global_ids
 
 PREDICT_BATCH = 8192
 EXP_NAME = "icU_tabformer"

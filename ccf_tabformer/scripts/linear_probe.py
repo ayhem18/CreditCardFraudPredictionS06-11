@@ -23,10 +23,10 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
 from sklearn.preprocessing import StandardScaler
 
-from ccf_tabformer_dl.data.tokens import load_tokenized_table
-from ccf_tabformer_dl.model.network import MaskedFeatureModel, TabFormerConfig
-from ccf_tabformer_dl.model.vocab import build_global_vocab, to_global_ids
-from ccf_tabformer_dl.pretraining.config import PretrainConfig
+from ccf_tabformer_dl.data_contract.tokens import load_tokenized_table
+from ccf_tabformer_dl.tabformer_components.model.network import MaskedFeatureModel, TabFormerConfig
+from ccf_tabformer_dl.tabformer_components.model.vocab import build_global_vocab, to_global_ids
+from ccf_tabformer_dl.task_engines.pretraining.config import PretrainConfig
 
 EXTRACT_BATCH = 4096
 

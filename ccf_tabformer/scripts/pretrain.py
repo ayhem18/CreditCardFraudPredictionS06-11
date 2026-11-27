@@ -13,7 +13,7 @@ from __future__ import annotations
 import argparse                     
 from pathlib import Path
 
-from ccf_tabformer_dl.pretraining.engine import make_pretrain_engine
+from ccf_tabformer_dl.task_engines.pretraining.engine import make_pretrain_engine
 
 RECIPES_SUBDIR = "run_recipes/pretrain"
 

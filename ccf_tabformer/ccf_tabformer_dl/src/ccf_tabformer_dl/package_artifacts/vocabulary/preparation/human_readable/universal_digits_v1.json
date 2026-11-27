@@ -1,0 +1,12 @@
+{
+  "name": "universal_digits_v1",
+  "hash": "2a591c063dc284330790bebe259b3b6786e9f1f14ea148ad01a5606d5ad5061f",
+  "generating_process_signature": {
+    "strategy": "universal_digits",
+    "args": {
+      "field_spec_hash": "1510af27636413bc1200384f4f218f30a2169e6513db9966a8aaf25bff7b4e35",
+      "boolean_policy": "per_flag",
+      "mask_token": "[MASK]"
+    }
+  }
+}
