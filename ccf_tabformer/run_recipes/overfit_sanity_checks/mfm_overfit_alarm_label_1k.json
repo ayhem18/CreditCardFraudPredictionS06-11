@@ -1,0 +1,75 @@
+{
+  "human_readable_name": "mfm_overfit_alarm_label_1k",
+  "run_group": [
+    "overfit_sanity_check"
+  ],
+  "seed": 0,
+  "trainer": {
+    "max_epochs": 80,
+    "accelerator": "gpu",
+    "devices": 1,
+    "precision": "bf16-mixed",
+    "enable_progress_bar": true,
+    "accumulate_grad_batches": 1
+  },
+  "checkpoint_policy": {
+    "save_top_k": 1,
+    "save_last": false
+  },
+  "early_stopping": {
+    "name": "none"
+  },
+  "logger": {
+    "experiment": "ccf_tabformer_overfit_sanity_check",
+    "tags": {
+      "task": "mfm",
+      "scope": "overfit_sanity_check"
+    }
+  },
+  "experiment_config": {
+    "data": {
+      "row_subset": "alarm_label_1k_seed0",
+      "batch_size": 32,
+      "num_workers": 0
+    },
+    "embedding": {
+      "strategy": "additive",
+      "args": {
+        "d_model": 128
+      }
+    },
+    "masking": {
+      "strategy": "field_level",
+      "args": {
+        "feature_mask_prob": 0.15
+      }
+    },
+    "encoder": {
+      "strategy": "prenorm_transformer",
+      "args": {
+        "d_model": 128,
+        "n_layers": 2,
+        "n_heads": 4,
+        "ffn_mult": 4,
+        "dropout": 0.0
+      }
+    },
+    "head": {
+      "strategy": "shared_support_masked",
+      "args": {
+        "d_model": 128
+      }
+    },
+    "lr_config": {
+      "learning_rate": 0.001
+    },
+    "optimizer_config": {
+      "name": "adamw",
+      "weight_decay": 0.0,
+      "betas": [0.9, 0.95]
+    },
+    "lr_scheduler_config": {
+      "name": "constant"
+    }
+  }
+}

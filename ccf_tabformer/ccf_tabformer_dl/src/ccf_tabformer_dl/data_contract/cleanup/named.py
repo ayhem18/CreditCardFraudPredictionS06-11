@@ -28,6 +28,7 @@ def cleanup_named_freeze(
 ) -> None:
     manager = project_hash_manager()
     payload = _as_payload_directory(payload_dir)
+    occupant = None
     if configuration_hash is not None:
         occupant = process_hash_occupant(
             manager,
@@ -46,6 +47,8 @@ def cleanup_named_freeze(
     n_names = len(names)
     for i in range(n_names):
         current = names[i]
+        if occupant is not None and current == occupant:
+            continue
         _remove(
             kind=kind,
             name=current,
@@ -73,10 +76,11 @@ def _payload_for_name(
     if payload_dir is None:
         return None
     if current == requested:
-        return payload_dir
+        path = payload_dir.path
+    else:
+        path = payload_dir.path.parent / current
     return Directory.from_absolute(
-        path=payload_dir.path.parent / current,
-        policy=DirectoryParsePolicy.ALLOW_MISSING,
+        path=path, policy=DirectoryParsePolicy.ALLOW_MISSING
     )
 
 

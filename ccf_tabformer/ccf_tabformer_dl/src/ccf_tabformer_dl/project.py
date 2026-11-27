@@ -8,8 +8,76 @@ from dl_toolbox.base.file_management.file import File
 from dl_toolbox.base.input_output.json_io import read_object
 from dl_toolbox.base.parsing.parse_str import parse_non_empty_str
 from dl_toolbox.base.parsing.parse_utils import one_of_message, parse_one_of
-from dl_toolbox.project_layout.names import MARKER_FILENAME, TRACKING_BACKEND_FILENAME
+from dl_toolbox.project_layout.names import (
+    MARKER_FILENAME,
+    RUN_RECIPES_DIRNAME,
+    TRACKING_BACKEND_FILENAME,
+)
 from dl_toolbox.project_layout.project_layout import ProjectLayout, TrackingBackend
+
+OVERFIT_SANITY_CHECKS_DIRNAME = "overfit_sanity_checks"
+OVERFIT_RUN_GROUP = "overfit_sanity_check"
+GRID_SEARCH_OVERFIT_DIRNAME = "grid_search_overfit"
+
+
+def project_root_from_start(start: Path) -> Path:
+    """Directory that holds ``dl_toolbox_project.json``, walking up from ``start``."""
+    start_file = File.from_absolute(path=start)
+    marker = File.from_parent_walk(start=start_file, basename=MARKER_FILENAME)
+    return marker.parent().path
+
+
+def resolve_overfit_recipe(script: Path, recipe: str) -> Path:
+    """Resolve a recipe path or a name under ``run_recipes/overfit_sanity_checks``."""
+    text = parse_non_empty_str(recipe, label="recipe")
+    root = project_root_from_start(script)
+    recipes_dir = root / RUN_RECIPES_DIRNAME / OVERFIT_SANITY_CHECKS_DIRNAME
+    path = Path(text)
+    if path.is_absolute():
+        if path.is_file():
+            return path
+        raise FileNotFoundError(f"recipe not found: {path}")
+    relative_to_script = (script.parent / path).resolve()
+    if relative_to_script.is_file():
+        return relative_to_script
+    under_folder = recipes_dir / path
+    if under_folder.is_file():
+        return under_folder
+    direct = recipes_dir / path.name
+    if direct.is_file():
+        return direct
+    raise FileNotFoundError(
+        f"recipe not found as {text!r} (cwd/script) nor under {recipes_dir}"
+    )
+
+
+def resolve_grid_search_document(script: Path, document: str) -> Path:
+    """Resolve a grid-search JSON under ``run_recipes/overfit_sanity_checks``."""
+    text = parse_non_empty_str(document, label="grid_search")
+    root = project_root_from_start(script)
+    grids_dir = (
+        root
+        / RUN_RECIPES_DIRNAME
+        / OVERFIT_SANITY_CHECKS_DIRNAME
+        / GRID_SEARCH_OVERFIT_DIRNAME
+    )
+    path = Path(text)
+    if path.is_absolute():
+        if path.is_file():
+            return path
+        raise FileNotFoundError(f"grid search document not found: {path}")
+    relative_to_script = (script.parent / path).resolve()
+    if relative_to_script.is_file():
+        return relative_to_script
+    under_folder = grids_dir / path
+    if under_folder.is_file():
+        return under_folder
+    direct = grids_dir / path.name
+    if direct.is_file():
+        return direct
+    raise FileNotFoundError(
+        f"grid search document not found as {text!r} (cwd/script) nor under {grids_dir}"
+    )
 
 
 def load_project_layout(*, start: Path, tracking_backend: str | None) -> ProjectLayout:
