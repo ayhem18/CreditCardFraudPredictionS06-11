@@ -1,7 +1,8 @@
 {
   "human_readable_name": "mfm_overfit_alarm_label_1k",
   "run_group": [
-    "overfit_sanity_check"
+    "overfit_sanity_check",
+    "mfm"
   ],
   "seed": 0,
   "trainer": {
