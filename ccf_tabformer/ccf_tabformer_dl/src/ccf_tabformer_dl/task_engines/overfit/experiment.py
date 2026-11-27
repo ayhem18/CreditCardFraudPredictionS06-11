@@ -36,6 +36,7 @@ from ccf_tabformer_dl.tabformer_components.mfm_model import build_mfm_model
 from ccf_tabformer_dl.tabformer_components.reconstruction.steps import (
     RECON_ACC,
     recon_accuracy_metric,
+    recon_bce_metric,
     reconstruction_fit_steps,
 )
 from ccf_tabformer_dl.tabformer_components.table_spec import FrozenTableSpec
@@ -93,13 +94,16 @@ def assemble_overfit_train_only(
     spec: FrozenTableSpec,
     train_loader: DataLoader,
 ) -> TrainOnlyFitParts:
+    
     if not isinstance(train_loader, DataLoader):
         raise TypeError(
             f"train_loader must be DataLoader, got {type(train_loader)!r}"
         )
+    
     masker = build_masker(
         strategy=parsed.masking.strategy, args=parsed.masking.args, spec=spec
     )
+
     net = build_mfm_model(
         embedder=build_embedder(
             strategy=parsed.embedding.strategy,
@@ -113,13 +117,16 @@ def assemble_overfit_train_only(
             strategy=parsed.head.strategy, args=parsed.head.args, spec=spec
         ),
     )
+
     optimizer = AdamW(
         net.parameters(),
         lr=parsed.lr.learning_rate,
         weight_decay=parsed.optimizer.weight_decay,
         betas=parsed.optimizer.betas,
     )
+
     monitor_key = metric_log_name(RECON_ACC, "train", LEVEL_EPOCH, "mean")
+
     return TrainOnlyFitParts(
         net=net,
         loaders=TrainOnlyLoaders(train=train_loader),
@@ -127,6 +134,7 @@ def assemble_overfit_train_only(
         metrics=TrainOnlyMetrics(
             train_metrics=[
                 (recon_accuracy_metric(), (), EPOCH_REDUCERS),
+                (recon_bce_metric(), (), EPOCH_REDUCERS),
             ],
             monitor=MonitorConfig(key=monitor_key, mode="max"),
         ),
@@ -153,6 +161,7 @@ def _evaluate_overfit_recon(
     loader = context.loaders.named[OVERFIT_EVAL_LOADER_NAME]
     total_loss = 0.0
     total_acc = 0.0
+    total_bce = 0.0
     n_items = 0
     with torch.no_grad():
         for batch in loader:
@@ -171,26 +180,31 @@ def _evaluate_overfit_recon(
             loss = steps.loss_fn(output, prepared)
             metric_inputs = steps.build_metric_inputs_fn(output, prepared)
             acc_items = recon_accuracy_metric().metric_function(metric_inputs)
+            bce_items = recon_bce_metric().metric_function(metric_inputs)
             n_batch = int(acc_items.shape[0])
             total_loss += float(loss.detach().cpu().item()) * n_batch
             total_acc += float(acc_items.sum().detach().cpu().item())
+            total_bce += float(bce_items.sum().detach().cpu().item())
             n_items += n_batch
     if n_items < 1:
         raise RuntimeError("overfit inspect loader yielded no masked positions")
     mean_loss = total_loss / float(n_items)
     mean_acc = total_acc / float(n_items)
+    mean_bce = total_bce / float(n_items)
     (payload_dir.path / "recon_loss.txt").write_text(
         f"{mean_loss}\n", encoding="utf-8"
     )
     (payload_dir.path / "recon_acc.txt").write_text(
         f"{mean_acc}\n", encoding="utf-8"
     )
+    (payload_dir.path / "bce.txt").write_text(f"{mean_bce}\n", encoding="utf-8")
     return [
         LogItem.scalars(
             step=context.step,
             values={
                 "inspect/recon_loss": mean_loss,
                 "inspect/recon_acc": mean_acc,
+                "inspect/bce": mean_bce,
             },
         )
     ]

@@ -1,4 +1,4 @@
-"""FitSteps + masked-CE loss + reconstruction-accuracy for field-level MFM.
+"""FitSteps + masked-CE loss + recon_acc and bce metrics for field-level MFM.
 
 Masking happens in ``prepare_tensors`` via a ``Masker``. The model sees already
 masked ids; loss and metric read only the ``target_mask`` positions against the
@@ -26,6 +26,7 @@ MASKED_IDS_KEY = "masked_ids"
 TARGET_MASK_KEY = "target_mask"
 KEY_MASK = "mask"
 RECON_ACC = "recon_acc"
+BCE = "bce"
 _REDUCERS = {"mean": mean_items, "std": std_items, "min": min_items, "max": max_items}
 
 
@@ -80,6 +81,35 @@ def recon_accuracy_metric() -> MetricObject:
 
     return MetricObject(
         name=RECON_ACC,
+        required_keys=frozenset({KEY_OUTPUT, KEY_TARGET, KEY_MASK}),
+        metric_function=measure,
+        combiner=concat_dim0,
+        reducers=_REDUCERS,
+    )
+
+
+def recon_bce_metric() -> MetricObject:
+    def measure(tensors: Mapping[str, Tensor]) -> Tensor:
+        logits = tensors[KEY_OUTPUT]
+        target = tensors[KEY_TARGET]
+        mask = tensors[KEY_MASK]
+        masked_logits = logits[mask]
+        masked_target = target[mask]
+        n_classes = masked_logits.shape[-1]
+        one_hot = F.one_hot(masked_target, num_classes=n_classes).to(
+            dtype=masked_logits.dtype
+        )
+        finite = torch.isfinite(masked_logits)
+        safe_logits = masked_logits.masked_fill(~finite, 0.0)
+        per_class = F.binary_cross_entropy_with_logits(
+            safe_logits, one_hot, reduction="none"
+        )
+        per_class = per_class.masked_fill(~finite, 0.0)
+        n_finite = finite.to(dtype=per_class.dtype).sum(dim=-1).clamp_min(1.0)
+        return per_class.sum(dim=-1) / n_finite
+
+    return MetricObject(
+        name=BCE,
         required_keys=frozenset({KEY_OUTPUT, KEY_TARGET, KEY_MASK}),
         metric_function=measure,
         combiner=concat_dim0,

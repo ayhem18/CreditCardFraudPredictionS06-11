@@ -5,7 +5,7 @@
   ],
   "seed": 0,
   "trainer": {
-    "max_epochs": 80,
+    "max_epochs": 200,
     "accelerator": "gpu",
     "devices": 1,
     "precision": "bf16-mixed",
@@ -29,8 +29,8 @@
   "experiment_config": {
     "data": {
       "row_subset": "alarm_label_1k_seed0",
-      "batch_size": 32,
-      "num_workers": 0
+      "batch_size": 2028,
+      "num_workers": 4
     },
     "embedding": {
       "strategy": "additive",
@@ -48,7 +48,7 @@
       "strategy": "prenorm_transformer",
       "args": {
         "d_model": 128,
-        "n_layers": 2,
+        "n_layers": 6,
         "n_heads": 4,
         "ffn_mult": 4,
         "dropout": 0.0

@@ -74,6 +74,8 @@ def test_build_train_only_uses_absolute_lr_and_one_loader(
     assert built.optimization.optimizer.param_groups[0]["lr"] == pytest.approx(0.001)
     assert "/train/" in built.metrics.monitor.key
     assert built.metrics.monitor.mode == "max"
+    names = [spec[0].name for spec in built.metrics.train_metrics]
+    assert names == ["recon_acc", "bce"]
 
 
 def test_resolve_overfit_recipe_finds_named_file() -> None:

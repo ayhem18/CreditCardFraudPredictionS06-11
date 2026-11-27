@@ -12,6 +12,7 @@ from ccf_tabformer_dl.tabformer_components.mfm_model import build_mfm_model
 from ccf_tabformer_dl.tabformer_components.reconstruction.steps import (
     IDS_KEY,
     recon_accuracy_metric,
+    recon_bce_metric,
     reconstruction_fit_steps,
 )
 from tests.tabformer_components.fake_spec import tiny_ids, tiny_table_spec
@@ -79,3 +80,8 @@ def test_model_and_steps_produce_finite_loss() -> None:
     values = recon_accuracy_metric().metric_function(metric_inputs)
     assert values.ndim == 1
     assert bool(((values == 0) | (values == 1)).all())
+    bce = recon_bce_metric().metric_function(metric_inputs)
+    assert bce.ndim == 1
+    assert bce.shape[0] == values.shape[0]
+    assert bool(torch.isfinite(bce).all())
+    assert bool((bce >= 0).all())
