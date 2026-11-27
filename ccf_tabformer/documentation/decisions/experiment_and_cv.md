@@ -12,10 +12,12 @@ encoding and training setup without opening code. It names the three frozen-leve
 choices (by recipe/hash) and the four runtime-module strategies, plus the training
 args, and it drives the two runs.
 
-## Current scope: unsupervised reconstruction only, TrainVal, val = test
+## Status: reconstruction implemented (full run training); fine-tuning now active
 
-For now the work is **only the unsupervised-reconstruction pretraining** (run 1);
-finetuning/OOF (run 2, below) is deferred. Two decisions govern this phase:
+Run 1 (unsupervised reconstruction) is implemented and its full run is training.
+Run 2 (fine-tuning + OOF) is now the active work — its plan is
+[coding_plan_finetune.md](coding_plan_finetune.md). The two decisions below
+governed the reconstruction run and still hold for it:
 
 - **TrainVal, not TrainOnly.** The engine must report a validation metric so we
   can see whether the model *generalizes* its reconstruction, not just fits the
@@ -65,6 +67,12 @@ valid if the transformer's 5 folds are the **same partition** the existing stack
 used. So the fold assignment is a frozen artifact **imported from the parent
 `CreditCardFraud` project**, not a fresh `KFold` here. Same row→fold map →
 comparable OOF AUC.
+
+The concrete artifact is
+`ccf_ml/src/ccf_ml/package_artifacts/cv_splits/alarm_profile_stratified_cv.json`
+(`n_splits=5`, `id_column="id"`, `target="is_fraud"`, `folds[k].val_ids`). A new
+`folds` data level imports it and aligns it to `inner_table.row_ids()` — see
+[coding_plan_finetune.md](coding_plan_finetune.md).
 
 ## The strategy axis (oracle): the experiment recipes
 
