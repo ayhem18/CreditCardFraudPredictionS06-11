@@ -1,17 +1,20 @@
 {
-  "human_readable_name": "ft_pilot_f0_pretrained",
-  "run_group": ["finetune", "pilot_fold0"],
+  "human_readable_name": "mfm_finetune_pilot_fold0_pretrained",
+  "run_group": [
+    "finetune",
+    "pilot"
+  ],
   "seed": 0,
   "trainer": {
     "max_epochs": 15,
     "accelerator": "gpu",
     "devices": 1,
     "precision": "bf16-mixed",
-    "enable_progress_bar": false,
+    "enable_progress_bar": true,
     "accumulate_grad_batches": 1
   },
   "checkpoint_policy": {
-    "save_top_k": 1,
+    "save_top_k": 0,
     "save_last": true
   },
   "early_stopping": {
@@ -20,36 +23,55 @@
   "logger": {
     "experiment": "ccf_tabformer_finetune",
     "tags": {
+      "task": "finetune",
       "scope": "pilot_fold0",
-      "regime": "pretrained_finetune"
+      "regime": "pretrained"
     }
   },
   "experiment_config": {
-    "tokens_dir": "data/tokens",
-    "fold": 0,
-    "init": "pretrained",
-    "freeze_encoder": false,
-    "pretrained_checkpoint": "PASS_VIA_--checkpoint",
-    "model": {
-      "d_model": 768,
-      "n_layers": 12,
-      "n_heads": 12,
-      "ffn_mult": 4,
-      "dropout": 0.1
-    },
-    "head": {
-      "hidden": 256,
-      "dropout": 0.1
-    },
     "data": {
+      "inner_table": "fixed_width_v1",
+      "folds": "alarm_profile_5fold_v1",
+      "fold": 0,
       "batch_size": 1024,
-      "num_workers": 8,
-      "max_rows": 0
+      "num_workers": 4
     },
-    "optimizer": {
-      "learning_rate": 0.0001,
-      "weight_decay": 0.01,
-      "encoder_lr_mult": 0.1
+    "regime": "pretrained",
+    "pretrained_checkpoint": "SET_AFTER_FULL_RUN.ckpt",
+    "embedding": {
+      "strategy": "additive",
+      "args": {
+        "d_model": 1024
+      }
+    },
+    "encoder": {
+      "strategy": "prenorm_transformer",
+      "args": {
+        "d_model": 1024,
+        "n_layers": 6,
+        "n_heads": 8,
+        "ffn_mult": 4,
+        "dropout": 0.0
+      }
+    },
+    "classifier_head": {
+      "strategy": "mean_pool",
+      "args": {
+        "d_model": 1024,
+        "hidden": 256,
+        "dropout": 0.1
+      }
+    },
+    "lr_config": {
+      "learning_rate": 0.0001
+    },
+    "optimizer_config": {
+      "name": "adamw",
+      "weight_decay": 0.0,
+      "betas": [0.9, 0.95]
+    },
+    "lr_scheduler_config": {
+      "name": "constant"
     }
   }
 }

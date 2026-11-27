@@ -254,6 +254,7 @@ dependencies = [
     { name = "dl-toolbox", extra = ["dl", "mlflow"] },
     { name = "pandas" },
     { name = "python-dotenv" },
+    { name = "scikit-learn" },
     { name = "tqdm" },
 ]
 
@@ -273,6 +274,7 @@ requires-dist = [
     { name = "pandas", specifier = ">=2.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
+    { name = "scikit-learn", specifier = ">=1.4" },
     { name = "tqdm", specifier = ">=4.66.0" },
 ]
 provides-extras = ["dev"]

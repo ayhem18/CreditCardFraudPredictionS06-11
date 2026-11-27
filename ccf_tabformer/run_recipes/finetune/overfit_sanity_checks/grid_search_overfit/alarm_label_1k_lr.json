@@ -1,0 +1,10 @@
+{
+  "starting_recipe": "cls_overfit_alarm_label_1k.json",
+  "grid_search_exp_name": "cls_alarm_label_1k_lr",
+  "grid_search_config": [
+    {
+      "param_name": "lr_config.learning_rate",
+      "param_values": "logspace:1e-5:1e-3:5"
+    }
+  ]
+}

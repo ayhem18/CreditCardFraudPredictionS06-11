@@ -1,0 +1,29 @@
+{
+  "hash": "ea390aa07ee9b49c59e65575fe5e6b5f7f37efeda6c4420a5e04e03a69642911",
+  "generating_process_name": "alarm_profile_5fold_v1",
+  "generating_process_signature": {
+    "strategy": "imported",
+    "args": {
+      "inner_table_hash": "4f3d4ba556a20d9110bb23e7e59150faceff92120a2c9dcb227b2f8dd6286240",
+      "scheme": "alarm_profile_stratified_cv",
+      "source_sha256": "c146cb8f350316177886cc77578e11c21250a9c6f95dd904a3fdabf55cd7c45c",
+      "n_parent_rows": 999944,
+      "n_splits": 5
+    }
+  },
+  "payload_meta": {
+    "n_rows": 999944,
+    "n_parent_rows": 999944,
+    "n_splits": 5,
+    "n_train": 699960,
+    "n_test": 299984,
+    "n_val": [
+      139992,
+      139992,
+      139992,
+      139992,
+      139992
+    ],
+    "fold_id_sha256": "9a5a63fbd1c86a4873b9ef039239d8db347825e3cfb69d6daa1c67c76ad190f8"
+  }
+}

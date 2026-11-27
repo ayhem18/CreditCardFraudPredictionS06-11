@@ -13,7 +13,12 @@ from ccf_tabformer_dl.data_contract.field_spec.entities import (
 )
 from ccf_tabformer_dl.data_contract.inner_table.layout import build_inner_table_layout
 from ccf_tabformer_dl.data_contract.inner_table.preparation.fixed_width import encode_inner_table
-from ccf_tabformer_dl.data_contract.inner_table_dataset import InnerTableIndexDataset
+from ccf_tabformer_dl.data_contract.inner_table_dataset import (
+    LABEL_KEY,
+    ROW_ID_KEY,
+    InnerTableIndexDataset,
+    InnerTableLabeledDataset,
+)
 from ccf_tabformer_dl.data_contract.vocabulary.entity import (
     MASK_TOKEN_DEFAULT,
     build_universal_digits_inventory,
@@ -95,3 +100,22 @@ def test_encode_inner_table_and_index_dataset() -> None:
     assert spec.mask_id == 14
     assert int(spec.feature_index[0]) == 0
     assert int(spec.feature_index[3]) == 1
+    labeled = InnerTableLabeledDataset(
+        token_ids=token_ids,
+        labels=np.array([1, 0, -1], dtype=np.int8),
+        row_ids=np.array([10, 20, 30], dtype=np.int64),
+        row_index=np.array([1, 0], dtype=np.int64),
+    )
+    item = labeled[0]
+    assert torch.equal(item[IDS_KEY], torch.tensor(expected[1], dtype=torch.long))
+    assert float(item[LABEL_KEY].item()) == 0.0
+    assert int(item[ROW_ID_KEY].item()) == 20
+    unlabeled = InnerTableLabeledDataset(
+        token_ids=token_ids,
+        labels=None,
+        row_ids=np.array([10, 20, 30], dtype=np.int64),
+        row_index=np.array([2], dtype=np.int64),
+    )
+    test_item = unlabeled[0]
+    assert LABEL_KEY not in test_item
+    assert int(test_item[ROW_ID_KEY].item()) == 30

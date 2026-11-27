@@ -20,6 +20,11 @@ OVERFIT_RUN_GROUP = "overfit_sanity_check"
 GRID_SEARCH_OVERFIT_DIRNAME = "grid_search_overfit"
 FULL_RUN_DIRNAME = "full_run"
 FULL_RUN_GROUP = "full_run"
+FINETUNE_DIRNAME = "finetune"
+FINETUNE_RUN_GROUP = "finetune"
+FINETUNE_FOLDS_DIRNAME = "folds"
+FINETUNE_OVERFIT_SANITY_CHECKS_DIRNAME = "overfit_sanity_checks"
+FINETUNE_OVERFIT_RUN_GROUP = ("finetune", "overfit_sanity_check")
 
 
 def project_root_from_start(start: Path) -> Path:
@@ -31,38 +36,55 @@ def project_root_from_start(start: Path) -> Path:
 
 def resolve_overfit_recipe(script: Path, recipe: str) -> Path:
     """Resolve a recipe path or a name under ``run_recipes/overfit_sanity_checks``."""
-    text = parse_non_empty_str(recipe, label="recipe")
-    root = project_root_from_start(script)
-    recipes_dir = root / RUN_RECIPES_DIRNAME / OVERFIT_SANITY_CHECKS_DIRNAME
-    path = Path(text)
-    if path.is_absolute():
-        if path.is_file():
-            return path
-        raise FileNotFoundError(f"recipe not found: {path}")
-    relative_to_script = (script.parent / path).resolve()
-    if relative_to_script.is_file():
-        return relative_to_script
-    under_folder = recipes_dir / path
-    if under_folder.is_file():
-        return under_folder
-    direct = recipes_dir / path.name
-    if direct.is_file():
-        return direct
-    raise FileNotFoundError(
-        f"recipe not found as {text!r} (cwd/script) nor under {recipes_dir}"
+    return _resolve_named_recipe(
+        script,
+        recipe,
+        folder=OVERFIT_SANITY_CHECKS_DIRNAME,
+        label="recipe",
+    )
+
+
+def resolve_finetune_recipe(script: Path, recipe: str) -> Path:
+    """Resolve a recipe path or a name under ``run_recipes/finetune``."""
+    return _resolve_named_recipe(
+        script,
+        recipe,
+        folder=FINETUNE_DIRNAME,
+        label="recipe",
+    )
+
+
+def resolve_finetune_overfit_recipe(script: Path, recipe: str) -> Path:
+    """Resolve a recipe under ``run_recipes/finetune/overfit_sanity_checks``."""
+    return _resolve_named_recipe(
+        script,
+        recipe,
+        folder=f"{FINETUNE_DIRNAME}/{FINETUNE_OVERFIT_SANITY_CHECKS_DIRNAME}",
+        label="recipe",
     )
 
 
 def resolve_full_run_recipe(script: Path, recipe: str) -> Path:
     """Resolve a recipe path or a name under ``run_recipes/full_run``."""
-    text = parse_non_empty_str(recipe, label="recipe")
+    return _resolve_named_recipe(
+        script,
+        recipe,
+        folder=FULL_RUN_DIRNAME,
+        label="recipe",
+    )
+
+
+def _resolve_named_recipe(
+    script: Path, recipe: str, *, folder: str, label: str
+) -> Path:
+    text = parse_non_empty_str(recipe, label=label)
     root = project_root_from_start(script)
-    recipes_dir = root / RUN_RECIPES_DIRNAME / FULL_RUN_DIRNAME
+    recipes_dir = root / RUN_RECIPES_DIRNAME / folder
     path = Path(text)
     if path.is_absolute():
         if path.is_file():
             return path
-        raise FileNotFoundError(f"recipe not found: {path}")
+        raise FileNotFoundError(f"{label} not found: {path}")
     relative_to_script = (script.parent / path).resolve()
     if relative_to_script.is_file():
         return relative_to_script
@@ -73,7 +95,20 @@ def resolve_full_run_recipe(script: Path, recipe: str) -> Path:
     if direct.is_file():
         return direct
     raise FileNotFoundError(
-        f"recipe not found as {text!r} (cwd/script) nor under {recipes_dir}"
+        f"{label} not found as {text!r} (cwd/script) nor under {recipes_dir}"
+    )
+
+
+def resolve_finetune_overfit_grid_search_document(script: Path, document: str) -> Path:
+    """Resolve a grid-search JSON under ``run_recipes/finetune/overfit_sanity_checks``."""
+    return _resolve_named_recipe(
+        script,
+        document,
+        folder=(
+            f"{FINETUNE_DIRNAME}/{FINETUNE_OVERFIT_SANITY_CHECKS_DIRNAME}/"
+            f"{GRID_SEARCH_OVERFIT_DIRNAME}"
+        ),
+        label="grid_search",
     )
 
 

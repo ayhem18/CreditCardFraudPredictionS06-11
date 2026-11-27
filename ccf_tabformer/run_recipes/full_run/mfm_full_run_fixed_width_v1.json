@@ -33,7 +33,7 @@
   "experiment_config": {
     "data": {
       "inner_table": "fixed_width_v1",
-      "batch_size": 10000,
+      "batch_size": 4000,
       "num_workers": 12
     },
     "embedding": {

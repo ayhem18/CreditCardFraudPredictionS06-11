@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Freeze the data-contract chain:
-#   field_spec → vocabulary → inner_table → row_subset
+#   field_spec → vocabulary → inner_table → row_subset → folds
 #
 # Does not create a venv. Uses project-root .venv python
 # (Scripts/python.exe on Windows, bin/python on Linux). Never uv run.
@@ -26,11 +26,13 @@ FIELD_SPEC_NAME="declared_v1"
 VOCABULARY_NAME="universal_digits_v1"
 INNER_TABLE_NAME="fixed_width_v1"
 ROW_SUBSET_NAME="alarm_label_1k_seed0"
+FOLDS_NAME="alarm_profile_5fold_v1"
 
 FIELD_SPEC_ALIAS="${PKG_ART}/field_spec/collections/${FIELD_SPEC_NAME}.json"
 VOCABULARY_ALIAS="${PKG_ART}/vocabulary/collections/${VOCABULARY_NAME}.json"
 INNER_TABLE_ALIAS="${PKG_ART}/inner_table/collections/${INNER_TABLE_NAME}.json"
 ROW_SUBSET_ALIAS="${PKG_ART}/row_subset/collections/${ROW_SUBSET_NAME}.json"
+FOLDS_ALIAS="${PKG_ART}/folds/collections/${FOLDS_NAME}.json"
 
 usage() {
   echo "Usage: $0 [--force]" >&2
@@ -103,7 +105,7 @@ run_step() {
 cd "${REPO}"
 
 echo "============================================================"
-echo "data contract: ${FIELD_SPEC_NAME} → ${VOCABULARY_NAME} → ${INNER_TABLE_NAME} → ${ROW_SUBSET_NAME}"
+echo "data contract: ${FIELD_SPEC_NAME} → ${VOCABULARY_NAME} → ${INNER_TABLE_NAME} → ${ROW_SUBSET_NAME} → ${FOLDS_NAME}"
 echo "python=${PYTHON}"
 echo "============================================================"
 
@@ -125,6 +127,11 @@ run_step "row_subset ${ROW_SUBSET_NAME}" "${ROW_SUBSET_ALIAS}" \
   "${SETUP}/define_row_subset_collection.py" \
   --parent "${INNER_TABLE_NAME}" \
   --name "${ROW_SUBSET_NAME}"
+
+run_step "folds ${FOLDS_NAME}" "${FOLDS_ALIAS}" \
+  "${SETUP}/define_folds_collection.py" \
+  --parent "${INNER_TABLE_NAME}" \
+  --name "${FOLDS_NAME}"
 
 echo "============================================================"
 echo "data contract done"

@@ -41,9 +41,15 @@ class MeanPoolClassifierHead(ClassifierHead):
         return self._d_model
 
     def forward(self, hidden: Tensor) -> Tensor:
-        raise NotImplementedError(
-            "contract stub: hidden.mean(dim=1) -> self.mlp(...) -> squeeze(-1)"
-        )
+        if hidden.ndim != 3:
+            raise ValueError(
+                f"hidden must be float (B, S, d_model), got shape {tuple(hidden.shape)}"
+            )
+        if int(hidden.shape[-1]) != self._d_model:
+            raise ValueError(
+                f"hidden d_model {int(hidden.shape[-1])} != {self._d_model}"
+            )
+        return self.mlp(hidden.mean(dim=1)).squeeze(-1)
 
 
 def build_mean_pool_args(args: dict) -> dict:

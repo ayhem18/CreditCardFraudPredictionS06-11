@@ -1,0 +1,14 @@
+{
+  "name": "alarm_profile_5fold_v1",
+  "hash": "8b7a89796117227bbe9c328120777222af6249ee560258a2d4a21086bbba4a4e",
+  "generating_process_signature": {
+    "strategy": "imported",
+    "args": {
+      "inner_table_hash": "4f3d4ba556a20d9110bb23e7e59150faceff92120a2c9dcb227b2f8dd6286240",
+      "scheme": "alarm_profile_stratified_cv",
+      "source_sha256": "c146cb8f350316177886cc77578e11c21250a9c6f95dd904a3fdabf55cd7c45c",
+      "n_parent_rows": 999944,
+      "n_splits": 5
+    }
+  }
+}

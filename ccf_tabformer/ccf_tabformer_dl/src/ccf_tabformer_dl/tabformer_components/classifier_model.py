@@ -44,6 +44,8 @@ class ClassifierModel(nn.Module):
 
     def set_encoder_frozen(self, *, frozen: bool) -> None:
         """Freeze/unfreeze the pretrained backbone (embedder + encoder)."""
+        if not isinstance(frozen, bool):
+            raise TypeError(f"frozen must be bool, got {type(frozen)!r}")
         for param in self.embedder.parameters():
             param.requires_grad = not frozen
         for param in self.encoder.parameters():
