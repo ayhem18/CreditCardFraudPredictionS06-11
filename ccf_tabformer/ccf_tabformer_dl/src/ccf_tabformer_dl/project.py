@@ -18,6 +18,8 @@ from dl_toolbox.project_layout.project_layout import ProjectLayout, TrackingBack
 OVERFIT_SANITY_CHECKS_DIRNAME = "overfit_sanity_checks"
 OVERFIT_RUN_GROUP = "overfit_sanity_check"
 GRID_SEARCH_OVERFIT_DIRNAME = "grid_search_overfit"
+FULL_RUN_DIRNAME = "full_run"
+FULL_RUN_GROUP = "full_run"
 
 
 def project_root_from_start(start: Path) -> Path:
@@ -32,6 +34,30 @@ def resolve_overfit_recipe(script: Path, recipe: str) -> Path:
     text = parse_non_empty_str(recipe, label="recipe")
     root = project_root_from_start(script)
     recipes_dir = root / RUN_RECIPES_DIRNAME / OVERFIT_SANITY_CHECKS_DIRNAME
+    path = Path(text)
+    if path.is_absolute():
+        if path.is_file():
+            return path
+        raise FileNotFoundError(f"recipe not found: {path}")
+    relative_to_script = (script.parent / path).resolve()
+    if relative_to_script.is_file():
+        return relative_to_script
+    under_folder = recipes_dir / path
+    if under_folder.is_file():
+        return under_folder
+    direct = recipes_dir / path.name
+    if direct.is_file():
+        return direct
+    raise FileNotFoundError(
+        f"recipe not found as {text!r} (cwd/script) nor under {recipes_dir}"
+    )
+
+
+def resolve_full_run_recipe(script: Path, recipe: str) -> Path:
+    """Resolve a recipe path or a name under ``run_recipes/full_run``."""
+    text = parse_non_empty_str(recipe, label="recipe")
+    root = project_root_from_start(script)
+    recipes_dir = root / RUN_RECIPES_DIRNAME / FULL_RUN_DIRNAME
     path = Path(text)
     if path.is_absolute():
         if path.is_file():

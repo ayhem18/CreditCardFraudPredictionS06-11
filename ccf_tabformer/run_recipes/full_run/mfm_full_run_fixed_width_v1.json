@@ -1,0 +1,79 @@
+{
+  "human_readable_name": "mfm_full_run_fixed_width_v1",
+  "run_group": [
+    "full_run",
+    "mfm"
+  ],
+  "seed": 0,
+  "trainer": {
+    "max_epochs": 500,
+    "accelerator": "gpu",
+    "devices": 1,
+    "precision": "bf16-mixed",
+    "enable_progress_bar": true,
+    "accumulate_grad_batches": 1
+  },
+  "checkpoint_policy": {
+    "save_top_k": 1,
+    "save_last": false
+  },
+  "early_stopping": {
+    "name": "patience",
+    "patience": 50,
+    "min_delta": 0.0
+  },
+  "logger": {
+    "experiment": "ccf_tabformer_full_run",
+    "tags": {
+      "task": "mfm",
+      "scope": "full_run",
+      "selected_from": "alarm_label_1k_lr_exp_1"
+    }
+  },
+  "experiment_config": {
+    "data": {
+      "inner_table": "fixed_width_v1",
+      "batch_size": 2028,
+      "num_workers": 4
+    },
+    "embedding": {
+      "strategy": "additive",
+      "args": {
+        "d_model": 1024
+      }
+    },
+    "masking": {
+      "strategy": "field_level",
+      "args": {
+        "feature_mask_prob": 0.15
+      }
+    },
+    "encoder": {
+      "strategy": "prenorm_transformer",
+      "args": {
+        "d_model": 1024,
+        "n_layers": 6,
+        "n_heads": 8,
+        "ffn_mult": 4,
+        "dropout": 0.0
+      }
+    },
+    "head": {
+      "strategy": "shared_support_masked",
+      "args": {
+        "d_model": 1024
+      }
+    },
+    "lr_config": {
+      "learning_rate": 0.000316227766016838
+    },
+    "optimizer_config": {
+      "name": "adamw",
+      "weight_decay": 0.0,
+      "betas": [0.9, 0.95]
+    },
+    "lr_scheduler_config": {
+      "name": "constant"
+    }
+  }
+}

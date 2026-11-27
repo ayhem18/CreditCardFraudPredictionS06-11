@@ -9,6 +9,7 @@ from ccf_tabformer_dl.tabformer_components.reconstruction.steps import (
     recon_accuracy_metric,
     recon_bce_metric,
     reconstruction_fit_steps,
+    reconstruction_train_val_fit_steps,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "recon_accuracy_metric",
     "recon_bce_metric",
     "reconstruction_fit_steps",
+    "reconstruction_train_val_fit_steps",
 ]

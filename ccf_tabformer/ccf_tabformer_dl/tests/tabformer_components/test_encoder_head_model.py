@@ -11,9 +11,11 @@ from ccf_tabformer_dl.tabformer_components.masking.oracle import build_masker
 from ccf_tabformer_dl.tabformer_components.mfm_model import build_mfm_model
 from ccf_tabformer_dl.tabformer_components.reconstruction.steps import (
     IDS_KEY,
+    TARGET_MASK_KEY,
     recon_accuracy_metric,
     recon_bce_metric,
     reconstruction_fit_steps,
+    reconstruction_train_val_fit_steps,
 )
 from tests.tabformer_components.fake_spec import tiny_ids, tiny_table_spec
 
@@ -85,3 +87,23 @@ def test_model_and_steps_produce_finite_loss() -> None:
     assert bce.shape[0] == values.shape[0]
     assert bool(torch.isfinite(bce).all())
     assert bool((bce >= 0).all())
+
+
+def test_train_val_steps_seed_val_mask_under_inference_mode() -> None:
+    spec = tiny_table_spec()
+    masker = build_masker(
+        strategy="field_level", args={"feature_mask_prob": 0.4}, spec=spec
+    )
+    steps = reconstruction_train_val_fit_steps(masker=masker, val_mask_seed=0)
+    batch = {IDS_KEY: tiny_ids()}
+    with torch.inference_mode():
+        first = steps.prepare_tensors_fn(batch)
+        second = steps.prepare_tensors_fn(batch)
+    assert torch.equal(first[TARGET_MASK_KEY], second[TARGET_MASK_KEY])
+    train_masks = [
+        steps.prepare_tensors_fn(batch)[TARGET_MASK_KEY] for _ in range(8)
+    ]
+    differ = any(
+        not torch.equal(train_masks[0], later) for later in train_masks[1:]
+    )
+    assert differ
