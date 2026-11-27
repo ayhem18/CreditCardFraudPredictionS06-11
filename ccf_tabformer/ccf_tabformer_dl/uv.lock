@@ -724,6 +724,7 @@ mlflow = [
 
 [package.metadata]
 requires-dist = [
+    { name = "boto3", marker = "extra == 's3'", specifier = ">=1.34" },
     { name = "lightning", marker = "extra == 'dl'", specifier = ">=2.0.0" },
     { name = "lightning", marker = "extra == 'fcmae'", specifier = ">=2.0.0" },
     { name = "mlflow", marker = "extra == 'mlflow'" },
@@ -749,7 +750,7 @@ requires-dist = [
     { name = "transformers", marker = "extra == 'fcmae'", specifier = ">=4.56.0" },
     { name = "wandb", marker = "extra == 'wandb'" },
 ]
-provides-extras = ["dl", "geometry", "tensorboard", "wandb", "mlflow", "fcmae"]
+provides-extras = ["dl", "geometry", "tensorboard", "wandb", "mlflow", "s3", "fcmae"]
 
 [package.metadata.requires-dev]
 dev = [

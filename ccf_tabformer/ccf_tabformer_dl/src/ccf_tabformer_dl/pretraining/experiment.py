@@ -34,17 +34,26 @@ class PretrainExperiment:
     def build_train_only(
         self, experiment_config: Mapping[str, Any], *, project_root: object
     ) -> TrainOnlyFitParts:
+
         config = PretrainConfig.parse(experiment_config)
+
         tokens_dir = _resolve_tokens_dir(config.tokens_dir, project_root=project_root)
+
+        # what is table here exactly ? 
         table = load_tokenized_table(tokens_dir=tokens_dir)
+
         vocab = build_global_vocab(table.specs)
 
         local = table.train_codes if config.corpus == "train" else table.token_codes
+
+
         if config.data.max_rows > 0:
             local = local[: config.data.max_rows]
+        
         global_ids = to_global_ids(local, vocab=vocab)
 
         dataset = TokenizedDataset(global_ids=global_ids, labels=None)
+        
         loader = DataLoader(
             dataset,
             batch_size=config.data.batch_size,
@@ -63,6 +72,8 @@ class PretrainExperiment:
                 dropout=config.model.dropout,
             ),
         )
+
+
         sampler = TokenMaskSampler(
             feature_index=vocab.feature_index,
             n_features=vocab.n_features,
@@ -71,17 +82,22 @@ class PretrainExperiment:
                 feature_mask_prob=config.mask.feature_mask_prob,
             ),
         )
+
         steps = masked_feature_fit_steps(sampler=sampler)
+
         monitor_key = metric_log_name(RECON_ACC, "train", LEVEL_EPOCH, "mean")
+
         metrics = TrainOnlyMetrics(
             train_metrics=[(recon_accuracy_metric(), (), EPOCH_REDUCERS)],
             monitor=MonitorConfig(key=monitor_key, mode="max"),
         )
+
         optimizer = AdamW(
             net.parameters(),
             lr=config.optimizer.learning_rate,
             weight_decay=config.optimizer.weight_decay,
         )
+
         return TrainOnlyFitParts(
             net=net,
             loaders=TrainOnlyLoaders(train=loader),

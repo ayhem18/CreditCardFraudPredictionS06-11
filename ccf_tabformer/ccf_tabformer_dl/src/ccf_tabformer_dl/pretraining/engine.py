@@ -24,11 +24,16 @@ def make_pretrain_engine(
     tracking_backend: str | None = None,
     force: bool = False,
 ) -> DefaultLayoutTrainOnlyEngine:
+    # Everything in this file is a wrapper around the existing engine code with the exception of PretrainExperiment()
+    # that's what needs to be understood
+
     layout = load_project_layout(start=start, tracking_backend=tracking_backend)
+
     return DefaultLayoutTrainOnlyEngine(
         purpose=EnginePurpose.FIT,
         layout=layout,
         train_recipe=File.from_absolute(path=recipe),
+
         experiment=PretrainExperiment(),
         force=(
             IdentityOverwritePolicy.OVERWRITE_NAME

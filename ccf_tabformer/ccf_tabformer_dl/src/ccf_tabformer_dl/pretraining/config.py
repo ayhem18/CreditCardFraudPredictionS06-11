@@ -26,6 +26,8 @@ class DataCfg(BaseModel):
     max_rows: int = Field(ge=0)  # 0 means use the whole corpus
 
 
+
+# this needs to be understood in more details
 class MaskCfg(BaseModel):
     model_config = _STRICT
     token_mask_prob: float = Field(ge=0.0, lt=1.0)
