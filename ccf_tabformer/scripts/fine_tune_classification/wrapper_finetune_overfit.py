@@ -1,8 +1,8 @@
 """Write a classification-overfit grid, then train each member on a free GPU.
 
-  python scripts/wrapper_finetune_overfit.py alarm_label_1k_lr.json
-  python scripts/wrapper_finetune_overfit.py alarm_label_1k_lr.json --force
-  python scripts/wrapper_finetune_overfit.py alarm_label_1k_lr.json --min-free-gib 20
+  python scripts/fine_tune_classification/wrapper_finetune_overfit.py alarm_label_1k_lr.json
+  python scripts/fine_tune_classification/wrapper_finetune_overfit.py alarm_label_1k_lr.json --force
+  python scripts/fine_tune_classification/wrapper_finetune_overfit.py alarm_label_1k_lr.json --min-free-gib 20
 """
 
 from __future__ import annotations

@@ -2,8 +2,8 @@
 
 GPU-batch child of ``wrapper_finetune_overfit.py``. Prefer the wrapper.
 
-  python scripts/finetune_overfit.py cls_overfit_alarm_label_1k.json
-  python scripts/finetune_overfit.py cls_overfit_alarm_label_1k.json --force
+  python scripts/fine_tune_classification/finetune_overfit.py cls_overfit_alarm_label_1k.json
+  python scripts/fine_tune_classification/finetune_overfit.py cls_overfit_alarm_label_1k.json --force
 """
 
 from __future__ import annotations

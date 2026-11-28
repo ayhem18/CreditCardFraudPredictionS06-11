@@ -93,7 +93,7 @@ thin `scripts/data/define_*_collection.py` scripts). The overfit dataset is
 - Done: freeze chain `field_spec` → `vocabulary` → `inner_table` (full numpy) →
   `row_subset` (row indices), plus `InnerTableIndexDataset`.
 - Phase 3: TrainOnly overfit engine over `alarm_label_1k_seed0`
-  (`task_engines/overfit`, `scripts/overfit_train.py`, recipe
+  (`task_engines/overfit`, `scripts/unsupervised_reconstruction/overfit_train.py`, recipe
   `run_recipes/overfit_sanity_checks/mfm_overfit_alarm_label_1k.json`). Grid
   wrapper still later. Phase 4: TrainVal, val = test.
 

@@ -1,7 +1,7 @@
 """Train an overfit sanity-check recipe on a frozen row_subset.
 
-  python scripts/overfit_train.py mfm_overfit_alarm_label_1k.json
-  python scripts/overfit_train.py mfm_overfit_alarm_label_1k.json --force
+  python scripts/unsupervised_reconstruction/overfit_train.py mfm_overfit_alarm_label_1k.json
+  python scripts/unsupervised_reconstruction/overfit_train.py mfm_overfit_alarm_label_1k.json --force
 """
 
 from __future__ import annotations

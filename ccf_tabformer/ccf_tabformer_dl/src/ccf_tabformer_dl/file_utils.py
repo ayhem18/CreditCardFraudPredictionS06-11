@@ -29,6 +29,10 @@ Layout::
         tabformer_components/      # TableSpec, embedder, masker, encoder, head, model
         task_engines/              # overfit / full-run engines
       scripts/
+        data/
+        tracking/
+        unsupervised_reconstruction/
+        fine_tune_classification/
       experiments/
 
 This project is nested inside the competition git repo. Find the toolbox

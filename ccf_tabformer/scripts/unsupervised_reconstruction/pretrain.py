@@ -1,8 +1,8 @@
 """Run MFM pretraining from a recipe.
 
-  python scripts/pretrain.py <recipe.json>
-  python scripts/pretrain.py <name>            # under run_recipes/pretrain/
-  python scripts/pretrain.py <recipe> --force  # overwrite this run name
+  python scripts/unsupervised_reconstruction/pretrain.py <recipe.json>
+  python scripts/unsupervised_reconstruction/pretrain.py <name>            # under run_recipes/pretrain/
+  python scripts/unsupervised_reconstruction/pretrain.py <recipe> --force  # overwrite this run name
 
 Uses the project's dedicated venv. The tracking backend defaults to the one in
 .tracking-backend (mlflow).
@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse                     
 from pathlib import Path
 
+from ccf_tabformer_dl.project import project_root_from_start
 from ccf_tabformer_dl.task_engines.pretraining.engine import make_pretrain_engine
 
 RECIPES_SUBDIR = "run_recipes/pretrain"
@@ -22,7 +23,7 @@ def _resolve_recipe(script: Path, recipe: str) -> Path:
     direct = Path(recipe)
     if direct.is_file():
         return direct.resolve()
-    tree_root = script.parent.parent  # scripts/ -> project tree root
+    tree_root = project_root_from_start(script)
     under = tree_root / RECIPES_SUBDIR / recipe
     if under.is_file():
         return under.resolve()

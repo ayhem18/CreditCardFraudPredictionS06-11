@@ -1,7 +1,7 @@
 """Train one fine-tune recipe (one imported fold).
 
-  python scripts/finetune.py fivefold.json --checkpoint path/to/full_run.ckpt
-  python scripts/finetune.py pilot_fold0_random.json --force
+  python scripts/fine_tune_classification/finetune.py fivefold.json --checkpoint path/to/full_run.ckpt
+  python scripts/fine_tune_classification/finetune.py pilot_fold0_random.json --force
 """
 
 from __future__ import annotations

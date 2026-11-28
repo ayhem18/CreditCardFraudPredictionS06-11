@@ -1,7 +1,7 @@
 """Inspect a finished fine-tune run: write val/test logits under inspection_runs.
 
-  python scripts/finetune_inspect.py mfm_finetune_pretrained_fold0.json
-  python scripts/finetune_inspect.py fold_0.json --inspect-recipe inspect_last.json
+  python scripts/fine_tune_classification/finetune_inspect.py mfm_finetune_pretrained_fold0.json
+  python scripts/fine_tune_classification/finetune_inspect.py fold_0.json --inspect-recipe inspect_last.json
 """
 
 from __future__ import annotations

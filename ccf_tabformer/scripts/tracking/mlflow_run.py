@@ -1,11 +1,11 @@
 """Open MLflow UI on this project's tracking store.
 
-Named mlflow_run.py so scripts/ does not shadow the mlflow package.
+Named mlflow_run.py so scripts/tracking/ does not shadow the mlflow package.
 
 Store paths come from ProjectLayout (logging JSON).
 
-  python mlflow_run.py
-  python mlflow_run.py --port 5001
+  python scripts/tracking/mlflow_run.py
+  python scripts/tracking/mlflow_run.py --port 5001
 """
 
 from __future__ import annotations

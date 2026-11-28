@@ -1,7 +1,7 @@
 """Write 5 fold recipes from a starting recipe, train them, inspect, assemble OOF.
 
-  python scripts/wrapper_finetune.py fivefold.json --checkpoint path/to/full_run.ckpt
-  python scripts/wrapper_finetune.py fivefold.json --checkpoint path/to.ckpt --force
+  python scripts/fine_tune_classification/wrapper_finetune.py fivefold.json --checkpoint path/to/full_run.ckpt
+  python scripts/fine_tune_classification/wrapper_finetune.py fivefold.json --checkpoint path/to.ckpt --force
 """
 
 from __future__ import annotations

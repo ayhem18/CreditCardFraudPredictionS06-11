@@ -36,7 +36,7 @@ VIRTUAL_ENV="$(cd .. && pwd)/.venv" uv sync --active
 
 ```bash
 cd ccf_tabformer
-MLFLOW_DISABLE_AGENT_HINT=1 .venv/bin/python scripts/pretrain.py server.json
+MLFLOW_DISABLE_AGENT_HINT=1 .venv/bin/python scripts/unsupervised_reconstruction/pretrain.py server.json
 ```
 
 Lightning spawns the two DDP workers itself; the engine binds the 2 freest
@@ -44,7 +44,7 @@ CUDA devices. Add `--force` only to overwrite a previous run of the same name.
 
 ## 3. Watch it
 
-- MLflow UI: `.venv/bin/python scripts/mlflow_run.py --host 0.0.0.0 --port 5000`
+- MLflow UI: `.venv/bin/python scripts/tracking/mlflow_run.py --host 0.0.0.0 --port 5000`
   then open the host:5000. Metric to watch: `recon_acc/train/epoch/mean`
   (monitored, mode=max).
 - Checkpoints: `storage/run_artifacts/pretrain/v1/mfm_v1_d768_l12/checkpoints/`
@@ -54,7 +54,7 @@ CUDA devices. Add `--force` only to overwrite a previous run of the same name.
 ## 4. Sanity probe after it finishes
 
 ```bash
-.venv/bin/python scripts/linear_probe.py \
+.venv/bin/python scripts/fine_tune_classification/linear_probe.py \
   --recipe run_recipes/pretrain/server.json \
   --checkpoint storage/run_artifacts/pretrain/v1/mfm_v1_d768_l12/checkpoints/live/<id>.ckpt
 ```
@@ -72,9 +72,9 @@ at the pretrained checkpoint with `--checkpoint` (its filename is a hash):
 cd ccf_tabformer
 CKPT=storage/run_artifacts/pretrain/v1/mfm_v1_d768_l12/checkpoints/live/<id>.ckpt
 
-.venv/bin/python scripts/finetune.py pilot_fold0_pretrained.json --checkpoint "$CKPT"
-.venv/bin/python scripts/finetune.py pilot_fold0_random.json
-.venv/bin/python scripts/finetune.py pilot_fold0_frozen.json     --checkpoint "$CKPT"
+.venv/bin/python scripts/fine_tune_classification/finetune.py pilot_fold0_pretrained.json --checkpoint "$CKPT"
+.venv/bin/python scripts/fine_tune_classification/finetune.py pilot_fold0_random.json
+.venv/bin/python scripts/fine_tune_classification/finetune.py pilot_fold0_frozen.json     --checkpoint "$CKPT"
 ```
 
 - Fine-tuning runs **single-GPU** (so the val-AUC metric is the whole fold, no
@@ -98,11 +98,11 @@ cd ccf_tabformer
 CKPT=storage/run_artifacts/pretrain/v1/mfm_v1_d768_l12/checkpoints/live/<id>.ckpt
 
 for f in 0 1 2 3 4; do
-  .venv/bin/python scripts/finetune.py fivefold.json --fold "$f" --checkpoint "$CKPT"
+  .venv/bin/python scripts/fine_tune_classification/finetune.py fivefold.json --fold "$f" --checkpoint "$CKPT"
 done
 # (two GPUs: run two folds at once with CUDA_VISIBLE_DEVICES=0 / =1)
 
-.venv/bin/python scripts/predict_oof.py \
+.venv/bin/python scripts/fine_tune_classification/predict_oof.py \
   --recipe run_recipes/finetune/fivefold.json \
   --runs-root storage/run_artifacts/finetune/fivefold \
   --out outputs/icU_tabformer

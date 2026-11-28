@@ -5,7 +5,7 @@ for every train row, and fits a per-fold logistic regression on the frozen
 alarm_profile folds -> out-of-fold ROC-AUC. This is the cheap gate on
 representation quality before committing to full fine-tuning.
 
-  python scripts/linear_probe.py --recipe <recipe.json> --checkpoint <ckpt>
+  python scripts/fine_tune_classification/linear_probe.py --recipe <recipe.json> --checkpoint <ckpt>
 
 NOTE: a probe AUC is only meaningful on a *real* pretraining run; on the tiny
 local smoke checkpoint it just confirms the extraction + probe plumbing.

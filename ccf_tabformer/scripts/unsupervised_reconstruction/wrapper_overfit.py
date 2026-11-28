@@ -1,8 +1,8 @@
 """Write an overfit grid from a grid-search document, then train each member.
 
-  python scripts/wrapper_overfit.py alarm_label_1k_lr.json
-  python scripts/wrapper_overfit.py alarm_label_1k_lr.json --force
-  python scripts/wrapper_overfit.py alarm_label_1k_lr.json --min-free-gib 20
+  python scripts/unsupervised_reconstruction/wrapper_overfit.py alarm_label_1k_lr.json
+  python scripts/unsupervised_reconstruction/wrapper_overfit.py alarm_label_1k_lr.json --force
+  python scripts/unsupervised_reconstruction/wrapper_overfit.py alarm_label_1k_lr.json --min-free-gib 20
 """
 
 from __future__ import annotations

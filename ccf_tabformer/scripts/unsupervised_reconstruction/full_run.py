@@ -1,7 +1,7 @@
 """Train a full-run recipe on the frozen inner_table (val = test split).
 
-  python scripts/full_run.py mfm_full_run_fixed_width_v1.json
-  python scripts/full_run.py mfm_full_run_fixed_width_v1.json --force
+  python scripts/unsupervised_reconstruction/full_run.py mfm_full_run_fixed_width_v1.json
+  python scripts/unsupervised_reconstruction/full_run.py mfm_full_run_fixed_width_v1.json --force
 """
 
 from __future__ import annotations
