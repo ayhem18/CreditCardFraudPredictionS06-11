@@ -21,7 +21,10 @@ def main() -> None:
     )
     parser.add_argument(
         "recipe",
-        help="Recipe JSON path or filename under run_recipes/full_run.",
+        help=(
+            "Recipe JSON path or filename under "
+            "run_recipes/supervised_reconstruction/full_run."
+        ),
     )
     parser.add_argument(
         "--force",

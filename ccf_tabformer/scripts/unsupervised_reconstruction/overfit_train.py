@@ -23,7 +23,7 @@ def main() -> None:
         "recipe",
         help=(
             "Recipe JSON path or filename under "
-            "run_recipes/overfit_sanity_checks."
+            "run_recipes/supervised_reconstruction/overfit_grid_search."
         ),
     )
     parser.add_argument(

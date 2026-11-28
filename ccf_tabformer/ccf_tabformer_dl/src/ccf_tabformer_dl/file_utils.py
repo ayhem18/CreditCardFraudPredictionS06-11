@@ -33,6 +33,14 @@ Layout::
         tracking/
         unsupervised_reconstruction/
         fine_tune_classification/
+      run_recipes/
+        supervised_reconstruction/
+          overfit_grid_search/
+          full_run/
+          pretrain/
+        classification_fine_tune/
+          overfit_grid_search/
+          full_run/
       experiments/
 
 This project is nested inside the competition git repo. Find the toolbox

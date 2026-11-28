@@ -45,7 +45,10 @@ def main() -> None:
     )
     parser.add_argument(
         "recipe",
-        help="Recipe JSON path or filename under run_recipes/finetune.",
+        help=(
+            "Recipe JSON path or filename under "
+            "run_recipes/classification_fine_tune/full_run."
+        ),
     )
     parser.add_argument(
         "--checkpoint",

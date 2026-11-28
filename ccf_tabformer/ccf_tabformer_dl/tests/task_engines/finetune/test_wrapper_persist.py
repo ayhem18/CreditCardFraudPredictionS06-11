@@ -74,7 +74,9 @@ _STARTING = {
 def _install_tmp_project(tmp_path: Path, monkeypatch, payload: dict) -> Path:
     import ccf_tabformer_dl.task_engines.finetune.wrapper.persist as persist
 
-    recipes_dir = tmp_path / "run_recipes" / "finetune"
+    recipes_dir = (
+        tmp_path / "run_recipes" / "classification_fine_tune" / "full_run"
+    )
     recipes_dir.mkdir(parents=True)
     starting = write_object(
         directory=Directory.from_absolute(
@@ -100,7 +102,13 @@ def test_write_fold_recipes_stamps_fold_and_checkpoint(
     checkpoint = str(tmp_path / "backbone.ckpt")
     paths = write_fold_recipes(
         start=tmp_path / "script.py",
-        starting_recipe=tmp_path / "run_recipes" / "finetune" / "fivefold.json",
+        starting_recipe=(
+            tmp_path
+            / "run_recipes"
+            / "classification_fine_tune"
+            / "full_run"
+            / "fivefold.json"
+        ),
         n_splits=2,
         pretrained_checkpoint=checkpoint,
     )

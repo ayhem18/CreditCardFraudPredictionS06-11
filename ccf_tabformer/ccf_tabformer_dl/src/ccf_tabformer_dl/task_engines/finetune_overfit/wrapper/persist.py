@@ -1,4 +1,4 @@
-"""Write kept classification-overfit grid members under run_recipes/finetune."""
+"""Write kept classification-overfit grid members under run_recipes/classification_fine_tune."""
 
 from __future__ import annotations
 
@@ -20,10 +20,10 @@ from dl_toolbox.dl_engine.exp_engine.grid_search import (
 from dl_toolbox.project_layout.names import RUN_RECIPES_DIRNAME
 
 from ccf_tabformer_dl.project import (
-    FINETUNE_DIRNAME,
+    CLASSIFICATION_FINE_TUNE_DIRNAME,
     FINETUNE_OVERFIT_RUN_GROUP,
-    FINETUNE_OVERFIT_SANITY_CHECKS_DIRNAME,
-    GRID_SEARCH_OVERFIT_DIRNAME,
+    GRID_SEARCH_OVERFIT_RUN_GROUP,
+    OVERFIT_GRID_SEARCH_DIRNAME,
     project_root_from_start,
     resolve_finetune_overfit_recipe,
 )
@@ -45,9 +45,8 @@ def grid_search_output_dir(script: Path, grid_search_exp_name: str) -> Path:
     return (
         root
         / RUN_RECIPES_DIRNAME
-        / FINETUNE_DIRNAME
-        / FINETUNE_OVERFIT_SANITY_CHECKS_DIRNAME
-        / GRID_SEARCH_OVERFIT_DIRNAME
+        / CLASSIFICATION_FINE_TUNE_DIRNAME
+        / OVERFIT_GRID_SEARCH_DIRNAME
         / grid_search_exp_name
     )
 
@@ -89,5 +88,5 @@ def _stamp_finetune_overfit_recipe(
         index=index,
         cartesian_index=cartesian_index,
         run_group=FINETUNE_OVERFIT_RUN_GROUP
-        + (GRID_SEARCH_OVERFIT_DIRNAME, grid_search_exp_name),
+        + (GRID_SEARCH_OVERFIT_RUN_GROUP, grid_search_exp_name),
     )

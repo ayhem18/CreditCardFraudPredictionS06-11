@@ -78,9 +78,10 @@ The concrete artifact is
 
 The existing `run_recipes/` already encode the key axes as named configs:
 
-- `pretrain/` — the shared reconstruction run (smoke_local, server).
-- `finetune/` — `pilot_fold0_random` (no pretraining, control),
-  `pilot_fold0_frozen` (pretrained encoder frozen, train head only),
+- `supervised_reconstruction/pretrain/` — the shared reconstruction run
+  (smoke_local, server).
+- `classification_fine_tune/full_run/` — `pilot_fold0_random` (no pretraining,
+  control), `pilot_fold0_frozen` (pretrained encoder frozen, train head only),
   `pilot_fold0_pretrained` (pretrained, full fine-tune), `fivefold` (the real OOF).
 
 These three finetune variants are exactly the ablation that answers **"did

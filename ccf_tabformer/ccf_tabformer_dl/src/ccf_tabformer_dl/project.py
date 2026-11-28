@@ -15,15 +15,33 @@ from dl_toolbox.project_layout.names import (
 )
 from dl_toolbox.project_layout.project_layout import ProjectLayout, TrackingBackend
 
-OVERFIT_SANITY_CHECKS_DIRNAME = "overfit_sanity_checks"
-OVERFIT_RUN_GROUP = "overfit_sanity_check"
-GRID_SEARCH_OVERFIT_DIRNAME = "grid_search_overfit"
+SUPERVISED_RECONSTRUCTION_DIRNAME = "supervised_reconstruction"
+CLASSIFICATION_FINE_TUNE_DIRNAME = "classification_fine_tune"
+OVERFIT_GRID_SEARCH_DIRNAME = "overfit_grid_search"
 FULL_RUN_DIRNAME = "full_run"
+PRETRAIN_DIRNAME = "pretrain"
+
+RECONSTRUCTION_OVERFIT_RECIPES = (
+    f"{SUPERVISED_RECONSTRUCTION_DIRNAME}/{OVERFIT_GRID_SEARCH_DIRNAME}"
+)
+RECONSTRUCTION_FULL_RUN_RECIPES = (
+    f"{SUPERVISED_RECONSTRUCTION_DIRNAME}/{FULL_RUN_DIRNAME}"
+)
+RECONSTRUCTION_PRETRAIN_RECIPES = (
+    f"{SUPERVISED_RECONSTRUCTION_DIRNAME}/{PRETRAIN_DIRNAME}"
+)
+CLASSIFICATION_OVERFIT_RECIPES = (
+    f"{CLASSIFICATION_FINE_TUNE_DIRNAME}/{OVERFIT_GRID_SEARCH_DIRNAME}"
+)
+CLASSIFICATION_FULL_RUN_RECIPES = (
+    f"{CLASSIFICATION_FINE_TUNE_DIRNAME}/{FULL_RUN_DIRNAME}"
+)
+
+OVERFIT_RUN_GROUP = "overfit_sanity_check"
+GRID_SEARCH_OVERFIT_RUN_GROUP = "grid_search_overfit"
 FULL_RUN_GROUP = "full_run"
-FINETUNE_DIRNAME = "finetune"
 FINETUNE_RUN_GROUP = "finetune"
 FINETUNE_FOLDS_DIRNAME = "folds"
-FINETUNE_OVERFIT_SANITY_CHECKS_DIRNAME = "overfit_sanity_checks"
 FINETUNE_OVERFIT_RUN_GROUP = ("finetune", "overfit_sanity_check")
 
 
@@ -35,41 +53,41 @@ def project_root_from_start(start: Path) -> Path:
 
 
 def resolve_overfit_recipe(script: Path, recipe: str) -> Path:
-    """Resolve a recipe path or a name under ``run_recipes/overfit_sanity_checks``."""
+    """Resolve a recipe under ``run_recipes/supervised_reconstruction/overfit_grid_search``."""
     return _resolve_named_recipe(
         script,
         recipe,
-        folder=OVERFIT_SANITY_CHECKS_DIRNAME,
+        folder=RECONSTRUCTION_OVERFIT_RECIPES,
         label="recipe",
     )
 
 
 def resolve_finetune_recipe(script: Path, recipe: str) -> Path:
-    """Resolve a recipe path or a name under ``run_recipes/finetune``."""
+    """Resolve a recipe under ``run_recipes/classification_fine_tune/full_run``."""
     return _resolve_named_recipe(
         script,
         recipe,
-        folder=FINETUNE_DIRNAME,
+        folder=CLASSIFICATION_FULL_RUN_RECIPES,
         label="recipe",
     )
 
 
 def resolve_finetune_overfit_recipe(script: Path, recipe: str) -> Path:
-    """Resolve a recipe under ``run_recipes/finetune/overfit_sanity_checks``."""
+    """Resolve a recipe under ``run_recipes/classification_fine_tune/overfit_grid_search``."""
     return _resolve_named_recipe(
         script,
         recipe,
-        folder=f"{FINETUNE_DIRNAME}/{FINETUNE_OVERFIT_SANITY_CHECKS_DIRNAME}",
+        folder=CLASSIFICATION_OVERFIT_RECIPES,
         label="recipe",
     )
 
 
 def resolve_full_run_recipe(script: Path, recipe: str) -> Path:
-    """Resolve a recipe path or a name under ``run_recipes/full_run``."""
+    """Resolve a recipe under ``run_recipes/supervised_reconstruction/full_run``."""
     return _resolve_named_recipe(
         script,
         recipe,
-        folder=FULL_RUN_DIRNAME,
+        folder=RECONSTRUCTION_FULL_RUN_RECIPES,
         label="recipe",
     )
 
@@ -100,44 +118,22 @@ def _resolve_named_recipe(
 
 
 def resolve_finetune_overfit_grid_search_document(script: Path, document: str) -> Path:
-    """Resolve a grid-search JSON under ``run_recipes/finetune/overfit_sanity_checks``."""
+    """Resolve a grid-search JSON under ``run_recipes/classification_fine_tune/overfit_grid_search``."""
     return _resolve_named_recipe(
         script,
         document,
-        folder=(
-            f"{FINETUNE_DIRNAME}/{FINETUNE_OVERFIT_SANITY_CHECKS_DIRNAME}/"
-            f"{GRID_SEARCH_OVERFIT_DIRNAME}"
-        ),
+        folder=CLASSIFICATION_OVERFIT_RECIPES,
         label="grid_search",
     )
 
 
 def resolve_grid_search_document(script: Path, document: str) -> Path:
-    """Resolve a grid-search JSON under ``run_recipes/overfit_sanity_checks``."""
-    text = parse_non_empty_str(document, label="grid_search")
-    root = project_root_from_start(script)
-    grids_dir = (
-        root
-        / RUN_RECIPES_DIRNAME
-        / OVERFIT_SANITY_CHECKS_DIRNAME
-        / GRID_SEARCH_OVERFIT_DIRNAME
-    )
-    path = Path(text)
-    if path.is_absolute():
-        if path.is_file():
-            return path
-        raise FileNotFoundError(f"grid search document not found: {path}")
-    relative_to_script = (script.parent / path).resolve()
-    if relative_to_script.is_file():
-        return relative_to_script
-    under_folder = grids_dir / path
-    if under_folder.is_file():
-        return under_folder
-    direct = grids_dir / path.name
-    if direct.is_file():
-        return direct
-    raise FileNotFoundError(
-        f"grid search document not found as {text!r} (cwd/script) nor under {grids_dir}"
+    """Resolve a grid-search JSON under ``run_recipes/supervised_reconstruction/overfit_grid_search``."""
+    return _resolve_named_recipe(
+        script,
+        document,
+        folder=RECONSTRUCTION_OVERFIT_RECIPES,
+        label="grid_search",
     )
 
 

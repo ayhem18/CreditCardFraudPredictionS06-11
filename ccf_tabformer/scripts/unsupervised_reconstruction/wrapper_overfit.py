@@ -35,7 +35,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
             "Read a grid-search document, write kept exp_i recipes under "
-            "run_recipes/overfit_sanity_checks/grid_search_overfit/"
+            "run_recipes/supervised_reconstruction/overfit_grid_search/"
             "<grid_search_exp_name>/, then train each one on a free GPU."
         )
     )
@@ -43,7 +43,7 @@ def main() -> None:
         "grid_search",
         help=(
             "Grid-search JSON path or filename under "
-            "run_recipes/overfit_sanity_checks/grid_search_overfit."
+            "run_recipes/supervised_reconstruction/overfit_grid_search."
         ),
     )
     parser.add_argument(

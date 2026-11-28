@@ -79,7 +79,12 @@ _STARTING = {
 def _install_tmp_project(tmp_path: Path, monkeypatch, payload: dict) -> None:
     import ccf_tabformer_dl.task_engines.finetune_overfit.wrapper.persist as persist
 
-    recipes_dir = tmp_path / "run_recipes" / "finetune" / "overfit_sanity_checks"
+    recipes_dir = (
+        tmp_path
+        / "run_recipes"
+        / "classification_fine_tune"
+        / "overfit_grid_search"
+    )
     recipes_dir.mkdir(parents=True)
     starting = write_object(
         directory=Directory.from_absolute(

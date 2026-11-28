@@ -71,7 +71,12 @@ def _install_tmp_project(
 ) -> None:
     import ccf_tabformer_dl.task_engines.overfit.wrapper.persist as persist
 
-    recipes_dir = tmp_path / "run_recipes" / "overfit_sanity_checks"
+    recipes_dir = (
+        tmp_path
+        / "run_recipes"
+        / "supervised_reconstruction"
+        / "overfit_grid_search"
+    )
     recipes_dir.mkdir(parents=True)
     starting = write_object(
         directory=Directory.from_absolute(

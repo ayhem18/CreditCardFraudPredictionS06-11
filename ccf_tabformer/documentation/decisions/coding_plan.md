@@ -34,7 +34,7 @@ From `digital_lab_engine/scripts` + `task_engine`:
   `cleanup_named_freeze`).
 - **The overfit wrapper**: read a grid-search document → write one recipe per grid
   member → run each on a free GPU (`--min-free-gib`). This is the pruning tool.
-- **Recipes** in `run_recipes/<mode>/`; MLflow logger; `human_readable_name` as the
+- **Recipes** in `run_recipes/<task>/<mode>/`; MLflow logger; `human_readable_name` as the
   run/`generating_process_name`; `--force` overwrites that name only.
 
 ## The two tools, and why components come first
@@ -94,7 +94,7 @@ thin `scripts/data/define_*_collection.py` scripts). The overfit dataset is
   `row_subset` (row indices), plus `InnerTableIndexDataset`.
 - Phase 3: TrainOnly overfit engine over `alarm_label_1k_seed0`
   (`task_engines/overfit`, `scripts/unsupervised_reconstruction/overfit_train.py`, recipe
-  `run_recipes/overfit_sanity_checks/mfm_overfit_alarm_label_1k.json`). Grid
+  `run_recipes/supervised_reconstruction/overfit_grid_search/mfm_overfit_alarm_label_1k.json`). Grid
   wrapper still later. Phase 4: TrainVal, val = test.
 
 ## Decisions — status

@@ -1,7 +1,7 @@
 """Run MFM pretraining from a recipe.
 
   python scripts/unsupervised_reconstruction/pretrain.py <recipe.json>
-  python scripts/unsupervised_reconstruction/pretrain.py <name>            # under run_recipes/pretrain/
+  python scripts/unsupervised_reconstruction/pretrain.py <name>            # under run_recipes/supervised_reconstruction/pretrain/
   python scripts/unsupervised_reconstruction/pretrain.py <recipe> --force  # overwrite this run name
 
 Uses the project's dedicated venv. The tracking backend defaults to the one in
@@ -13,10 +13,13 @@ from __future__ import annotations
 import argparse                     
 from pathlib import Path
 
-from ccf_tabformer_dl.project import project_root_from_start
-from ccf_tabformer_dl.task_engines.pretraining.engine import make_pretrain_engine
+from dl_toolbox.project_layout.names import RUN_RECIPES_DIRNAME
 
-RECIPES_SUBDIR = "run_recipes/pretrain"
+from ccf_tabformer_dl.project import (
+    RECONSTRUCTION_PRETRAIN_RECIPES,
+    project_root_from_start,
+)
+from ccf_tabformer_dl.task_engines.pretraining.engine import make_pretrain_engine
 
 
 def _resolve_recipe(script: Path, recipe: str) -> Path:
@@ -24,17 +27,24 @@ def _resolve_recipe(script: Path, recipe: str) -> Path:
     if direct.is_file():
         return direct.resolve()
     tree_root = project_root_from_start(script)
-    under = tree_root / RECIPES_SUBDIR / recipe
+    recipes_dir = tree_root / RUN_RECIPES_DIRNAME / RECONSTRUCTION_PRETRAIN_RECIPES
+    under = recipes_dir / recipe
     if under.is_file():
         return under.resolve()
     raise FileNotFoundError(
-        f"recipe not found as {recipe!r} (cwd) nor under {tree_root / RECIPES_SUBDIR}"
+        f"recipe not found as {recipe!r} (cwd) nor under {recipes_dir}"
     )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run ccf_tabformer MFM pretraining.")
-    parser.add_argument("recipe", help="Recipe JSON path, or a name under run_recipes/pretrain/.")
+    parser.add_argument(
+        "recipe",
+        help=(
+            "Recipe JSON path, or a name under "
+            "run_recipes/supervised_reconstruction/pretrain/."
+        ),
+    )
     parser.add_argument("--force", action="store_true", help="Overwrite this run name, then fit.")
     parser.add_argument("--tracking-backend", default=None, choices=["mlflow", "tensorboard"])
     args = parser.parse_args()

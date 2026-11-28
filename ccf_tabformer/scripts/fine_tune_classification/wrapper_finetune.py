@@ -50,7 +50,10 @@ def main() -> None:
     )
     parser.add_argument(
         "starting_recipe",
-        help="Recipe JSON path or filename under run_recipes/finetune.",
+        help=(
+            "Recipe JSON path or filename under "
+            "run_recipes/classification_fine_tune/full_run."
+        ),
     )
     parser.add_argument(
         "--checkpoint",
@@ -60,7 +63,10 @@ def main() -> None:
     parser.add_argument(
         "--inspect-recipe",
         default="inspect_last.json",
-        help="Inspect recipe JSON under run_recipes/finetune.",
+        help=(
+            "Inspect recipe JSON under "
+            "run_recipes/classification_fine_tune/full_run."
+        ),
     )
     parser.add_argument(
         "--force",

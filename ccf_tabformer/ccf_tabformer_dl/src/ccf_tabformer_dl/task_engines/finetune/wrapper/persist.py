@@ -17,8 +17,9 @@ from dl_toolbox.base.parsing.parse_str import parse_non_empty_str
 from dl_toolbox.project_layout.names import RUN_RECIPES_DIRNAME
 
 from ccf_tabformer_dl.project import (
-    FINETUNE_DIRNAME,
+    CLASSIFICATION_FINE_TUNE_DIRNAME,
     FINETUNE_FOLDS_DIRNAME,
+    FULL_RUN_DIRNAME,
     project_root_from_start,
     resolve_finetune_recipe,
 )
@@ -36,7 +37,8 @@ def fold_recipes_output_dir(script: Path, family_name: str) -> Path:
     return (
         root
         / RUN_RECIPES_DIRNAME
-        / FINETUNE_DIRNAME
+        / CLASSIFICATION_FINE_TUNE_DIRNAME
+        / FULL_RUN_DIRNAME
         / FINETUNE_FOLDS_DIRNAME
         / name
     )
@@ -49,7 +51,7 @@ def write_fold_recipes(
     n_splits: int,
     pretrained_checkpoint: str | None,
 ) -> tuple[Path, ...]:
-    """Stamp ``data.fold`` 0..n_splits-1 under ``run_recipes/finetune/folds/``."""
+    """Stamp ``data.fold`` 0..n_splits-1 under ``run_recipes/classification_fine_tune/full_run/folds/``."""
     splits = parse_positive_int(n_splits, label="n_splits")
     starting_path = resolve_finetune_recipe(start, str(starting_recipe))
     starting = read_object(file=File.from_absolute(path=starting_path))

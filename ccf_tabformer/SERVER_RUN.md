@@ -1,6 +1,6 @@
 # Running MFM pretraining on the server
 
-The full-scale recipe is `run_recipes/pretrain/server.json`
+The full-scale recipe is `run_recipes/supervised_reconstruction/pretrain/server.json`
 (`mfm_v1_d768_l12`): bidirectional encoder, **d_model 768 × 12 layers ×
 12 heads ≈ 85.4M params**, full train+test corpus (999,944 rows, label-free),
 ~21% token masking, **2-GPU DDP**, bf16-mixed, 30 epochs, batch 2048/GPU.
@@ -55,7 +55,7 @@ CUDA devices. Add `--force` only to overwrite a previous run of the same name.
 
 ```bash
 .venv/bin/python scripts/fine_tune_classification/linear_probe.py \
-  --recipe run_recipes/pretrain/server.json \
+  --recipe run_recipes/supervised_reconstruction/pretrain/server.json \
   --checkpoint storage/run_artifacts/pretrain/v1/mfm_v1_d768_l12/checkpoints/live/<id>.ckpt
 ```
 
@@ -103,7 +103,7 @@ done
 # (two GPUs: run two folds at once with CUDA_VISIBLE_DEVICES=0 / =1)
 
 .venv/bin/python scripts/fine_tune_classification/predict_oof.py \
-  --recipe run_recipes/finetune/fivefold.json \
+  --recipe run_recipes/classification_fine_tune/full_run/fivefold.json \
   --runs-root storage/run_artifacts/finetune/fivefold \
   --out outputs/icU_tabformer
 ```

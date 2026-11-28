@@ -7,7 +7,7 @@ each), this:
 Writes oof.csv / submission.csv / config.json so the member blends with the
 existing icU_* members via the competition's rank-mean harness.
 
-  python scripts/fine_tune_classification/predict_oof.py --recipe run_recipes/finetune/fivefold.json \
+  python scripts/fine_tune_classification/predict_oof.py --recipe run_recipes/classification_fine_tune/full_run/fivefold.json \
       --runs-root storage/run_artifacts/finetune/fivefold
 
 Copy the written oof.csv + submission.csv into the competition repo at

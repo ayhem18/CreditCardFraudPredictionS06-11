@@ -1,4 +1,4 @@
-"""Write kept overfit grid members under run_recipes/overfit_sanity_checks."""
+"""Write kept overfit grid members under run_recipes/supervised_reconstruction."""
 
 from __future__ import annotations
 
@@ -20,9 +20,10 @@ from dl_toolbox.dl_engine.exp_engine.grid_search import (
 from dl_toolbox.project_layout.names import RUN_RECIPES_DIRNAME
 
 from ccf_tabformer_dl.project import (
-    GRID_SEARCH_OVERFIT_DIRNAME,
+    GRID_SEARCH_OVERFIT_RUN_GROUP,
+    OVERFIT_GRID_SEARCH_DIRNAME,
     OVERFIT_RUN_GROUP,
-    OVERFIT_SANITY_CHECKS_DIRNAME,
+    SUPERVISED_RECONSTRUCTION_DIRNAME,
     project_root_from_start,
     resolve_overfit_recipe,
 )
@@ -42,8 +43,8 @@ def grid_search_output_dir(script: Path, grid_search_exp_name: str) -> Path:
     return (
         root
         / RUN_RECIPES_DIRNAME
-        / OVERFIT_SANITY_CHECKS_DIRNAME
-        / GRID_SEARCH_OVERFIT_DIRNAME
+        / SUPERVISED_RECONSTRUCTION_DIRNAME
+        / OVERFIT_GRID_SEARCH_DIRNAME
         / grid_search_exp_name
     )
 
@@ -86,7 +87,7 @@ def _stamp_overfit_recipe(
         cartesian_index=cartesian_index,
         run_group=(
             OVERFIT_RUN_GROUP,
-            GRID_SEARCH_OVERFIT_DIRNAME,
+            GRID_SEARCH_OVERFIT_RUN_GROUP,
             grid_search_exp_name,
         ),
     )
